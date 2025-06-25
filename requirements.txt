@@ -1,7 +1,0 @@
-fastapi[all]
-uvicorn[standard]
-celery[sqlalchemy]
-pymysql
-sqlmodel
-python-dotenv
-passlib[bcrypt]
