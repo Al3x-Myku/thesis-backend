@@ -33,7 +33,15 @@ HUNYUAN_PAINTDIR      = os.getenv("HUNYUAN_PAINTDIR", "tencent/Hunyuan3D-2")
 # ─── Lazy singletons ──────────────────────────────────────────────────────────
 _shape_pipeline: Hunyuan3DDiTFlowMatchingPipeline | None = None
 _paint_pipeline: Hunyuan3DPaintPipeline       | None = None
-_remover = BackgroundRemover()
+_remover: BackgroundRemover | None = None
+
+
+def _get_remover() -> BackgroundRemover:
+    global _remover
+    if _remover is None:
+        print("→ Initializing BackgroundRemover…")
+        _remover = BackgroundRemover()
+    return _remover
 
 def _init_hunyuan_pipelines():
     global _shape_pipeline, _paint_pipeline
@@ -96,7 +104,12 @@ def build_mesh(crop_path: str, scene_folder: str) -> str:
 
     # 1) load & bg‐remove
     img = Image.open(crop_path).convert("RGB")
-    img = _remover(img)
+    if image.mode == "RGB":
+        rembg = _get_remover()
+        print(f"→ entering background removal for {crop_path}")
+        image = rembg(image)   # call the instance as a function
+        print(f"→ removed background for {crop_path}")
+    img = image
 
     base = Path(crop_path).stem
     out_dir = Path(scene_folder) / "meshes" / base
