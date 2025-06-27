@@ -46,7 +46,7 @@ httpx==0.28.1
 huggingface-hub==0.33.1
 humanfriendly==10.0
 humanize==4.12.3
--e git+https://github.com/TiberiuWSJ/thesis-backend.git@fe42fb25358c5dcc82de3a726fda39233753f46f#egg=hy3dgen&subdirectory=hunyuan3d-2
+-e git+ssh://git@github.com/TiberiuWSJ/thesis-backend.git@fe42fb25358c5dcc82de3a726fda39233753f46f#egg=hy3dgen&subdirectory=hunyuan3d-2
 idna==3.10
 imageio==2.37.0
 importlib_metadata==8.7.0

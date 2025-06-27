@@ -104,12 +104,11 @@ def build_mesh(crop_path: str, scene_folder: str) -> str:
 
     # 1) load & bg‐remove
     img = Image.open(crop_path).convert("RGB")
-    if image.mode == "RGB":
+    if img.mode == "RGB":
         rembg = _get_remover()
         print(f"→ entering background removal for {crop_path}")
-        image = rembg(image)   # call the instance as a function
+        img = rembg(img)   # call the instance as a function
         print(f"→ removed background for {crop_path}")
-    img = image
 
     base = Path(crop_path).stem
     out_dir = Path(scene_folder) / "meshes" / base
