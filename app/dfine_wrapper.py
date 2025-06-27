@@ -1,5 +1,4 @@
 # app/dfine_wrapper.py
-
 import os
 import sys
 import subprocess
@@ -15,32 +14,32 @@ def run_dfine_inference(
     output_dir: Optional[str] = None,
 ) -> None:
     """
-    Launches D-FINE’s torch_inf.py with an explicit absolute path,
-    so that running from dfine_root (cwd) won’t prepend dfine_root twice.
+    Spawn D-FINE’s torch_inf.py from inside its own repo directory,
+    with PYTHONPATH pointing at the D-FINE root so that `import src.*`
+    actually finds D-FINE/src.
     """
-    # locate the inference script
-    torch_inf_py = Path(dfine_root) / "tools" / "inference" / "torch_inf.py"
-    if not torch_inf_py.exists():
-        raise FileNotFoundError(f"Could not find torch_inf.py at: {torch_inf_py}")
+    # 1) locate the script absolutely
+    torch_inf = (Path(dfine_root) / "tools" / "inference" / "torch_inf.py").resolve()
+    if not torch_inf.exists():
+        raise FileNotFoundError(f"Could not find `{torch_inf}`")
 
-    # turn it into an absolute path
-    script = torch_inf_py.resolve()
-
-    # build the command
+    # 2) build the exact same cmd you were using
     cmd = [
         sys.executable,
-        str(script),
+        str(torch_inf),
         "-c", str(config_path),
         "-r", str(checkpoint_path),
         "-i", str(input_image),
         "-d", device,
     ]
-
-    # pass along the output directory for crops if provided
     if output_dir:
         cmd += ["-o", str(output_dir)]
 
     print("Running D-FINE:", " ".join(cmd))
 
-    # run with cwd=dfine_root so imports like `from src.core import ...` work
-    subprocess.run(cmd, check=True, cwd=dfine_root)
+    # 3) copy & extend the current env with PYTHONPATH=D-FINE root
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(dfine_root))
+
+    # 4) cd into the D-FINE checkout so its internal sys.path hack still works
+    subprocess.run(cmd, check=True, cwd=dfine_root, env=env)
