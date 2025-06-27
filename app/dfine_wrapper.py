@@ -1,5 +1,5 @@
-# app/dfine_wrapper.py
-import os, sys, subprocess
+import sys
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -11,36 +11,28 @@ def run_dfine_inference(
     device: str = "cuda:0",
     output_dir: Optional[str] = None,
 ) -> None:
-    dfine_root = Path(dfine_root).expanduser().resolve()
-    torch_inf = dfine_root / "tools" / "inference" / "torch_inf.py"
-    if not torch_inf.exists():
-        raise FileNotFoundError(f"Could not find `{torch_inf}`")
+    torch_inf_py = Path(dfine_root) / "tools" / "inference" / "torch_inf.py"
+    if not torch_inf_py.exists():
+        raise FileNotFoundError(f"{torch_inf_py} missing")
 
-    # Only prepend dfine_root if the path is relative
-    def resolve_under_root(p: str) -> Path:
-        p = Path(p)
-        return p.resolve() if p.is_absolute() else (dfine_root / p).resolve()
-
-    config_abs     = resolve_under_root(config_path)
-    checkpoint_abs = resolve_under_root(checkpoint_path)
-    input_abs      = Path(input_image).resolve()
+    # If config/checkpoint are relative, make them absolute under DFINE_ROOT
+    cfg = Path(config_path)
+    if not cfg.is_absolute():
+        cfg = Path(dfine_root) / config_path
+    ckpt = Path(checkpoint_path)
+    if not ckpt.is_absolute():
+        ckpt = Path(dfine_root) / checkpoint_path
 
     cmd = [
         sys.executable,
-        str(torch_inf),
-        "-c", str(config_abs),
-        "-r", str(checkpoint_abs),
-        "-i", str(input_abs),
+        str(torch_inf_py),
+        "-c", str(cfg),
+        "-r", str(ckpt),
+        "-i", input_image,
         "-d", device,
     ]
     if output_dir:
-        cmd += ["-o", str(Path(output_dir).resolve())]
+        cmd += ["-o", output_dir]
 
-    print("→ Running D-FINE:", " ".join(cmd))
-
-    # ensure D-FINE/src is importable
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(dfine_root)
-
-    # cd into dfine_root so torch_inf’s internal paths work
-    subprocess.run(cmd, check=True, cwd=str(dfine_root), env=env)
+    print("Running D-FINE:", " ".join(cmd))
+    subprocess.run(cmd, check=True)
