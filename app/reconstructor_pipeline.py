@@ -119,7 +119,7 @@ def build_mesh(crop_path: str, scene_folder: str) -> str:
 
     # 4) paint
     print(f"  • paint gen for {base}")
-    painted = _paint_pipeline(mesh, image=image)[0]
+    painted = _paint_pipeline(mesh, image=image)
 
     textured_path = out_dir / f"{base}_textured.glb"
     painted.export(str(textured_path))
