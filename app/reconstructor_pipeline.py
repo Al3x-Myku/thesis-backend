@@ -124,3 +124,23 @@ def merge_meshes(mesh_paths: List[str], scene_folder: str) -> str:
     out = final_dir / "scene.glb"
     scene.export(str(out))
     return str(out)
+
+def full_reconstruction(image_path: str, scene_folder: str) -> str:
+    """
+    High‐level: detect → build each mesh → merge → return final path
+    """
+    try:
+        crops = detect_objects(image_path, scene_folder)
+    except Exception:
+        traceback.print_exc()
+        raise
+
+    results = []
+    for c in crops:
+        try:
+            results.append(build_mesh(c, scene_folder))
+        except Exception:
+            traceback.print_exc()
+            continue
+
+    return merge_meshes(results, scene_folder)
