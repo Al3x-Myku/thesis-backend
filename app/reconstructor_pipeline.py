@@ -75,19 +75,29 @@ def detect_objects(image_path: str, scene_folder: str) -> List[str]:
 def build_mesh(crop_path: str, scene_folder: str) -> str:
     _init_hunyuan_pipelines()
 
-    # — exactly your original background removal snippet —
+    # 1) load & bg‐remove
     image = Image.open(crop_path).convert("RGB")
-    if image.mode == 'RGB':
-        print("entering background removal")
-        rembg = BackgroundRemover()
-        image = rembg(image)
-        print("removed background")
-
     base = Path(crop_path).stem
+
+    if image.mode == 'RGB':
+        print(f"→ entering background removal for {crop_path}")
+        rembg = BackgroundRemover()
+        image_no_bg = rembg(image)
+        print(f"→ removed background for {crop_path}")
+
+        # save the background‐removed image alongside the crop
+        no_bg_dir = Path(crop_path).parent  # same folder as the crop
+        no_bg_path = no_bg_dir / f"{base}_no_bg.png"
+        image_no_bg.save(str(no_bg_path))
+        print(f"→ saved bg‐removed image to {no_bg_path}")
+
+        image = image_no_bg
+
+    # prepare mesh output dir
     out_dir = Path(scene_folder) / "meshes" / base
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # shape
+    # 2) shape
     print(f"  • shape gen for {base}")
     mesh = _shape_pipeline(
         image=image,
@@ -98,19 +108,24 @@ def build_mesh(crop_path: str, scene_folder: str) -> str:
         output_type="trimesh",
     )[0]
 
-    # cleanup
+    # save raw mesh before any cleaning/painting
+    raw_mesh_path = out_dir / f"{base}_raw.glb"
+    mesh.export(str(raw_mesh_path))
+    print(f"  • saved raw mesh to {raw_mesh_path}")
+
+    # 3) optional cleanups
     for cleaner in (FloaterRemover(), DegenerateFaceRemover(), FaceReducer()):
         mesh = cleaner(mesh)
-    mesh_path = out_dir / f"{base}.glb"
-    mesh.export(str(mesh_path))
 
-    # paint
+    # 4) paint
     print(f"  • paint gen for {base}")
     painted = _paint_pipeline(mesh, image=image)[0]
-    tex_path = out_dir / f"{base}_textured.glb"
-    painted.export(str(tex_path))
 
-    return str(tex_path)
+    textured_path = out_dir / f"{base}_textured.glb"
+    painted.export(str(textured_path))
+    print(f"  • saved textured mesh to {textured_path}")
+
+    return str(textured_path)
 
 def merge_meshes(mesh_paths: List[str], scene_folder: str) -> str:
     from trimesh import load, Scene as TScene
