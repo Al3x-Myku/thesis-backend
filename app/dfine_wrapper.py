@@ -1,7 +1,5 @@
 # app/dfine_wrapper.py
-import os
-import sys
-import subprocess
+import os, sys, subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -13,33 +11,36 @@ def run_dfine_inference(
     device: str = "cuda:0",
     output_dir: Optional[str] = None,
 ) -> None:
-    """
-    Spawn D-FINE’s torch_inf.py from inside its own repo directory,
-    with PYTHONPATH pointing at the D-FINE root so that `import src.*`
-    actually finds D-FINE/src.
-    """
-    # 1) locate the script absolutely
-    torch_inf = (Path(dfine_root) / "tools" / "inference" / "torch_inf.py").resolve()
+    dfine_root = Path(dfine_root).expanduser().resolve()
+    torch_inf = dfine_root / "tools" / "inference" / "torch_inf.py"
     if not torch_inf.exists():
         raise FileNotFoundError(f"Could not find `{torch_inf}`")
 
-    # 2) build the exact same cmd you were using
+    # Only prepend dfine_root if the path is relative
+    def resolve_under_root(p: str) -> Path:
+        p = Path(p)
+        return p.resolve() if p.is_absolute() else (dfine_root / p).resolve()
+
+    config_abs     = resolve_under_root(config_path)
+    checkpoint_abs = resolve_under_root(checkpoint_path)
+    input_abs      = Path(input_image).resolve()
+
     cmd = [
         sys.executable,
         str(torch_inf),
-        "-c", str(config_path),
-        "-r", str(checkpoint_path),
-        "-i", str(input_image),
+        "-c", str(config_abs),
+        "-r", str(checkpoint_abs),
+        "-i", str(input_abs),
         "-d", device,
     ]
     if output_dir:
-        cmd += ["-o", str(output_dir)]
+        cmd += ["-o", str(Path(output_dir).resolve())]
 
-    print("Running D-FINE:", " ".join(cmd))
+    print("→ Running D-FINE:", " ".join(cmd))
 
-    # 3) copy & extend the current env with PYTHONPATH=D-FINE root
+    # ensure D-FINE/src is importable
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(Path(dfine_root))
+    env["PYTHONPATH"] = str(dfine_root)
 
-    # 4) cd into the D-FINE checkout so its internal sys.path hack still works
-    subprocess.run(cmd, check=True, cwd=dfine_root, env=env)
+    # cd into dfine_root so torch_inf’s internal paths work
+    subprocess.run(cmd, check=True, cwd=str(dfine_root), env=env)
