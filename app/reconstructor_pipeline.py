@@ -4,6 +4,7 @@ import glob
 import traceback
 from pathlib import Path
 from typing import List
+from typing import Optional
 
 import torch
 from PIL import Image
@@ -31,9 +32,9 @@ HUNYUAN_SHAPEDIR_VARIANT   = os.getenv("HUNYUAN_SHAPEDIR_VARIANT", "fp16")
 HUNYUAN_PAINTDIR      = os.getenv("HUNYUAN_PAINTDIR", "tencent/Hunyuan3D-2")
 
 # ─── Lazy singletons ──────────────────────────────────────────────────────────
-_shape_pipeline: Hunyuan3DDiTFlowMatchingPipeline | None = None
-_paint_pipeline: Hunyuan3DPaintPipeline       | None = None
-_remover: BackgroundRemover | None = None
+_shape_pipeline: Optional[Hunyuan3DDiTFlowMatchingPipeline] = None
+_paint_pipeline: Optional[Hunyuan3DPaintPipeline]       = None
+_remover: Optional[BackgroundRemover] = None
 
 
 def _get_remover() -> BackgroundRemover:
