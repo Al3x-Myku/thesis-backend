@@ -1,6 +1,7 @@
 # app/dfine_wrapper.py
 import os, sys, subprocess
 from pathlib import Path
+from typing import Optional
 
 def run_dfine_inference(
     dfine_root: str,
@@ -8,7 +9,7 @@ def run_dfine_inference(
     checkpoint_path: str,
     input_image: str,
     device: str = "cuda:0",
-    output_dir: str | None = None,            # ← new
+    output_dir: Optional[str] = None,
 ) -> None:
     torch_inf_py = Path(dfine_root) / "tools" / "inference" / "torch_inf.py"
     if not torch_inf_py.exists():
