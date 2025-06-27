@@ -1,4 +1,3 @@
-# app/dfine_wrapper.py
 import os, sys, subprocess
 from pathlib import Path
 from typing import Optional
@@ -23,10 +22,9 @@ def run_dfine_inference(
         "-i", str(input_image),
         "-d", device,
     ]
-
     if output_dir:
-        # pass the target folder for crops
         cmd += ["-o", str(output_dir)]
 
     print("Running D-FINE:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    # ← here, pass cwd so imports resolve relative to D-FINE/src
+    subprocess.run(cmd, check=True, cwd=dfine_root)
