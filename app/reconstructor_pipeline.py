@@ -45,11 +45,10 @@ def _init_hunyuan_pipelines():
         _shape_pipeline = (
             Hunyuan3DDiTFlowMatchingPipeline
             .from_pretrained(HUNYUAN_SHAPEDIR, **kwargs)
-            .to(DEVICE)
         )
     if _paint_pipeline is None:
         print("→ Loading Hunyuan paint pipeline…")
-        _paint_pipeline = Hunyuan3DPaintPipeline.from_pretrained(HUNYUAN_PAINTDIR).to(DEVICE)
+        _paint_pipeline = Hunyuan3DPaintPipeline.from_pretrained(HUNYUAN_PAINTDIR)
 
 def detect_objects(image_path: str, scene_folder: str) -> List[str]:
     crop_dir = Path(scene_folder) / "crops"
