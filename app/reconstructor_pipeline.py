@@ -34,9 +34,10 @@ HUNYUAN_SHAPEDIR_VARIANT   = os.getenv("HUNYUAN_SHAPEDIR_VARIANT", "fp16")
 HUNYUAN_PAINTDIR           = os.getenv("HUNYUAN_PAINTDIR", "tencent/Hunyuan3D-2")
 
 # ─── Lazy singletons ──────────────────────────────────────────────────────────
-_shape_pipeline = None
-_paint_pipeline = None
-_depth_model    = None
+_shape_pipeline  = None
+_paint_pipeline  = None
+_depth_model     = None
+_depth_transform = None
 
 def _init_hunyuan_pipelines():
     global _shape_pipeline, _paint_pipeline
@@ -57,7 +58,9 @@ def _init_zoe_depth():
     global _depth_model
     if _depth_model is None:
         repo = "isl-org/ZoeDepth"
-        _depth_model = torch.hub.load(repo, "ZoeD_NK", pretrained=False, trust_repo=True).eval().cuda()
+        _depth_model = torch.hub.load(
+            repo, "ZoeD_NK", pretrained=False, trust_repo=True
+        ).eval().cuda()
         url = "https://github.com/isl-org/ZoeDepth/releases/download/v1.0/ZoeD_M12_NK.pt"
         sd  = load_state_dict_from_url(url, progress=True, map_location="cpu")
         _depth_model.load_state_dict(sd, strict=False)
@@ -144,9 +147,8 @@ def position_meshes(
     fov_deg: float = 60.0
 ) -> str:
     """
-    Given a list of textured mesh paths, detects objects again to get bboxes,
-    estimates depth-map, sorts left→right and positions them in 3D.
-    Exports scene_positioned.glb under scene_folder/final/.
+    Given textured mesh paths, re-detects bbox, estimates depth-map on GPU,
+    sorts left→right and positions meshes in 3D. Exports scene_positioned.glb.
     """
     image = Image.open(image_path).convert("RGB")
     W, H = image.size
@@ -163,19 +165,35 @@ def position_meshes(
     )[0]
     boxes = results["boxes"].cpu().numpy()
 
-    # 2) estimate depth-map once
+    # 2) estimate depth-map on GPU
     model_zoe = _init_zoe_depth()
-    depth_map = model_zoe.infer_pil(image)  # H×W numpy array
+    device    = next(model_zoe.parameters()).device
 
-    # 3) focal calculation from FOV
+    global _depth_transform
+    if _depth_transform is None:
+        _depth_transform = torch.hub.load(
+            "isl-org/ZoeDepth", "transforms", pretrained=True
+        ).to(device)
+
+    inp = _depth_transform({"image": image})["image"].unsqueeze(0).to(device)
+    with torch.no_grad():
+        depth_pred = model_zoe(inp)
+    depth_map = torch.nn.functional.interpolate(
+        depth_pred,
+        size=(H, W),
+        mode="bicubic",
+        align_corners=False
+    )[0, 0].cpu().numpy()
+
+    # 3) focal from FOV
     f = W / (2 * math.tan(math.radians(fov_deg)/2))
 
-    # 4) sort bboxes & mesh_paths left→right
+    # 4) sort left→right
     order = np.argsort(boxes[:, 0])
     boxes_sorted = boxes[order]
     meshes_sorted = [mesh_paths[i] for i in order][: len(boxes_sorted)]
 
-    # 5) build scene
+    # 5) place in scene
     scene = trimesh.Scene()
     for i, (mp, bb) in enumerate(zip(meshes_sorted, boxes_sorted)):
         x0, y0, x1, y1 = bb.astype(int)
@@ -199,7 +217,7 @@ def position_meshes(
 
 def full_reconstruction(image_path: str, scene_folder: str) -> str:
     """
-    High-level: detect crops → build meshes → position → return positioned scene path
+    High-level: detect → build meshes → position → return final path
     """
     try:
         crops = detect_objects(image_path, scene_folder)
@@ -215,8 +233,7 @@ def full_reconstruction(image_path: str, scene_folder: str) -> str:
             traceback.print_exc()
             continue
 
-    positioned_path = position_meshes(meshes, image_path, scene_folder)
-    return positioned_path
+    return position_meshes(meshes, image_path, scene_folder)
 
 def merge_meshes(mesh_paths: List[str], scene_folder: str) -> str:
     """
@@ -226,10 +243,7 @@ def merge_meshes(mesh_paths: List[str], scene_folder: str) -> str:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "scene_merged.glb"
 
-    # Load all meshes and merge them
     meshes = [trimesh.load(mp, force="scene") for mp in mesh_paths]
     merged_scene = trimesh.util.concatenate(meshes)
-
-    # Export the merged scene
     merged_scene.export(str(out_path))
     return str(out_path)
