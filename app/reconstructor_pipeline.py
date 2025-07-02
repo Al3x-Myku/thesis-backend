@@ -37,7 +37,6 @@ HUNYUAN_PAINTDIR           = os.getenv("HUNYUAN_PAINTDIR", "tencent/Hunyuan3D-2"
 _shape_pipeline  = None
 _paint_pipeline  = None
 _depth_model     = None
-_depth_transform = None
 
 def _init_hunyuan_pipelines():
     global _shape_pipeline, _paint_pipeline
@@ -64,16 +63,12 @@ def _init_zoe_depth():
         url = "https://github.com/isl-org/ZoeDepth/releases/download/v1.0/ZoeD_M12_NK.pt"
         sd  = load_state_dict_from_url(url, progress=True, map_location="cpu")
         _depth_model.load_state_dict(sd, strict=False)
-        # patch drop_path1 → drop_path
         for m in _depth_model.modules():
             if hasattr(m, "drop_path1") and not hasattr(m, "drop_path"):
                 m.drop_path = m.drop_path1
     return _depth_model
 
 def detect_objects(image_path: str, scene_folder: str) -> List[str]:
-    """
-    Run D-FINE, return sorted crop paths (input_crop0,1,2…).
-    """
     crop_dir = Path(scene_folder) / "crops"
     crop_dir.mkdir(parents=True, exist_ok=True)
 
@@ -86,7 +81,6 @@ def detect_objects(image_path: str, scene_folder: str) -> List[str]:
         output_dir=str(crop_dir),
     )
 
-    # gather crops named input_crop{i}.*
     pattern = re.compile(r"crop(\d+)")
     crops = []
     for ext in ("png","jpg","jpeg"):
@@ -96,25 +90,18 @@ def detect_objects(image_path: str, scene_folder: str) -> List[str]:
                 crops.append((int(m.group(1)), str(p)))
     if not crops:
         raise RuntimeError(f"No crops found in {crop_dir}")
-    # sort by the integer index
-    crops_sorted = [path for _, path in sorted(crops, key=lambda x: x[0])]
-    return crops_sorted
+    return [path for _, path in sorted(crops, key=lambda x: x[0])]
 
 def build_mesh(crop_path: str, scene_folder: str) -> str:
-    """
-    Given a crop image, produce a textured .glb via Hunyuan pipelines.
-    """
     _init_hunyuan_pipelines()
     image = Image.open(crop_path).convert("RGB")
     base  = Path(crop_path).stem
 
-    # background removal
     rembg = BackgroundRemover()
     image_no_bg = rembg(image)
     no_bg_path  = Path(crop_path).with_name(f"{base}_no_bg.png")
     image_no_bg.save(no_bg_path)
 
-    # shape generation
     out_dir = Path(scene_folder) / "meshes" / base
     out_dir.mkdir(parents=True, exist_ok=True)
     mesh = _shape_pipeline(
@@ -125,19 +112,15 @@ def build_mesh(crop_path: str, scene_folder: str) -> str:
         generator=torch.manual_seed(12345),
         output_type="trimesh",
     )[0]
-    raw_path = out_dir / f"{base}_raw.glb"
-    mesh.export(raw_path)
+    mesh.export(out_dir / f"{base}_raw.glb")
 
-    # cleaning
     for cleaner in (FloaterRemover(), DegenerateFaceRemover(), FaceReducer()):
         mesh = cleaner(mesh)
 
-    # painting
     painted = _paint_pipeline(mesh, image=image_no_bg)
-    textured_path = out_dir / f"{base}_textured.glb"
-    painted.export(textured_path)
-
-    return str(textured_path)
+    out_path = out_dir / f"{base}_textured.glb"
+    painted.export(out_path)
+    return str(out_path)
 
 def position_meshes(
     mesh_paths: List[str],
@@ -146,15 +129,10 @@ def position_meshes(
     threshold: float = 0.6,
     fov_deg: float = 60.0
 ) -> str:
-    """
-    Given textured mesh paths, re-detects bbox, estimates depth-map on GPU,
-    sorts left→right and positions meshes in 3D. Exports scene_positioned.glb.
-    """
     image = Image.open(image_path).convert("RGB")
     W, H = image.size
     cx, cy = W/2, H/2
 
-    # 1) detect bboxes
     processor = AutoImageProcessor.from_pretrained("ustc-community/dfine_x_obj365")
     model_det = DFineForObjectDetection.from_pretrained("ustc-community/dfine_x_obj365")
     inputs = processor(images=image, return_tensors="pt")
@@ -165,35 +143,20 @@ def position_meshes(
     )[0]
     boxes = results["boxes"].cpu().numpy()
 
-    # 2) estimate depth-map on GPU
+    # --- depth_map via infer_pil on CPU to match types ---
     model_zoe = _init_zoe_depth()
-    device    = next(model_zoe.parameters()).device
+    # temporarily move model to CPU for infer_pil
+    model_cpu = model_zoe.cpu()
+    depth_map = model_cpu.infer_pil(image)
+    # move model back to GPU
+    model_zoe.cuda()
 
-    global _depth_transform
-    if _depth_transform is None:
-        _depth_transform = torch.hub.load(
-            "isl-org/ZoeDepth", "transforms", pretrained=True
-        ).to(device)
-
-    inp = _depth_transform({"image": image})["image"].unsqueeze(0).to(device)
-    with torch.no_grad():
-        depth_pred = model_zoe(inp)
-    depth_map = torch.nn.functional.interpolate(
-        depth_pred,
-        size=(H, W),
-        mode="bicubic",
-        align_corners=False
-    )[0, 0].cpu().numpy()
-
-    # 3) focal from FOV
     f = W / (2 * math.tan(math.radians(fov_deg)/2))
 
-    # 4) sort left→right
     order = np.argsort(boxes[:, 0])
     boxes_sorted = boxes[order]
     meshes_sorted = [mesh_paths[i] for i in order][: len(boxes_sorted)]
 
-    # 5) place in scene
     scene = trimesh.Scene()
     for i, (mp, bb) in enumerate(zip(meshes_sorted, boxes_sorted)):
         x0, y0, x1, y1 = bb.astype(int)
@@ -216,12 +179,9 @@ def position_meshes(
     return str(out_path)
 
 def full_reconstruction(image_path: str, scene_folder: str) -> str:
-    """
-    High-level: detect → build meshes → position → return final path
-    """
     try:
         crops = detect_objects(image_path, scene_folder)
-    except Exception:
+    except:
         traceback.print_exc()
         raise
 
@@ -229,16 +189,13 @@ def full_reconstruction(image_path: str, scene_folder: str) -> str:
     for crop in crops:
         try:
             meshes.append(build_mesh(crop, scene_folder))
-        except Exception:
+        except:
             traceback.print_exc()
             continue
 
     return position_meshes(meshes, image_path, scene_folder)
 
 def merge_meshes(mesh_paths: List[str], scene_folder: str) -> str:
-    """
-    Merge multiple .glb files into one final scene.
-    """
     out_dir = Path(scene_folder) / "final"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "scene_merged.glb"
