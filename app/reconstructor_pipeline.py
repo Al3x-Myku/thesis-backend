@@ -126,13 +126,20 @@ def position_meshes(
     mesh_paths: List[str],
     image_path: str,
     scene_folder: str,
-    threshold: float = 0.6,
-    fov_deg: float = 60.0
+    threshold: float = 0.6
 ) -> str:
+    """
+    Given a list of textured mesh paths, re-detects bounding boxes,
+    estimates depth-map on CPU, calibrates focal length from the first mesh,
+    sorts left→right and positions meshes in 3D.
+    Exports scene_positioned.glb under scene_folder/final/.
+    """
+    # 1) Load image and get its center
     image = Image.open(image_path).convert("RGB")
     W, H = image.size
-    cx, cy = W/2, H/2
+    cx, cy = W / 2, H / 2
 
+    # 2) Run D-FINE object detection
     processor = AutoImageProcessor.from_pretrained("ustc-community/dfine_x_obj365")
     model_det = DFineForObjectDetection.from_pretrained("ustc-community/dfine_x_obj365")
     inputs = processor(images=image, return_tensors="pt")
@@ -141,26 +148,32 @@ def position_meshes(
     results = processor.post_process_object_detection(
         outputs, target_sizes=[(H, W)], threshold=threshold
     )[0]
-    boxes = results["boxes"].cpu().numpy()
+    boxes = results["boxes"].cpu().numpy()  # (N,4)
 
-    # --- depth_map via infer_pil on CPU to match types ---
+    # 3) Estimate depth-map on CPU to match types
     model_zoe = _init_zoe_depth()
-    # temporarily move model to CPU for infer_pil
     model_cpu = model_zoe.cpu()
-    depth_map = model_cpu.infer_pil(image)
-    # move model back to GPU
+    depth_map = model_cpu.infer_pil(image)  # H×W numpy array
     model_zoe.cuda()
 
-    f = W / (2 * math.tan(math.radians(fov_deg)/2))
-
+    # 4) Sort detections and mesh_paths from left to right
     order = np.argsort(boxes[:, 0])
     boxes_sorted = boxes[order]
     meshes_sorted = [mesh_paths[i] for i in order][: len(boxes_sorted)]
 
+    # 5) Calibrate focal length using the first mesh
+    mesh_ref = trimesh.load(meshes_sorted[0], force="scene")
+    w_mesh = float(mesh_ref.extents[0])                # model-unit width
+    x0, y0, x1, y1 = boxes_sorted[0].astype(int)
+    pix_w = x1 - x0                                    # pixel width
+    Z_ref = float(np.median(depth_map[y0:y1, x0:x1]))  # depth in meters
+    f = pix_w * Z_ref / w_mesh                         # focal length in px
+
+    # 6) Place each mesh in the scene
     scene = trimesh.Scene()
     for i, (mp, bb) in enumerate(zip(meshes_sorted, boxes_sorted)):
         x0, y0, x1, y1 = bb.astype(int)
-        xc, yc = (x0 + x1)/2, (y0 + y1)/2
+        xc, yc = (x0 + x1) / 2, (y0 + y1) / 2
         crop = depth_map[y0:y1, x0:x1]
         if crop.size == 0:
             continue
@@ -172,6 +185,7 @@ def position_meshes(
         mesh.apply_translation([X, Y, Z])
         scene.add_geometry(mesh, node_name=f"obj_{i}")
 
+    # 7) Export final positioned scene
     out_dir = Path(scene_folder) / "final"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "scene_positioned.glb"
