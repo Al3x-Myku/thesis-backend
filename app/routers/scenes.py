@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, status, Path, FileResponse
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, status, Path
+from fastapi.responses import FileResponse
 import os 
 from sqlmodel import Session
 from app.database import get_db
