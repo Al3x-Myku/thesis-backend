@@ -34,3 +34,35 @@ def get_scene_status(
     if not scene:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Scene not found")
     return SceneRead.from_orm(scene)
+
+
+def download_scene(
+    owner_id: int = Path(..., description="ID of the scene owner"),
+    scene_id: int = Path(..., description="ID of the scene"),
+):
+    """
+    Streams back the .glb file for a completed scene.
+    """
+    # Base data directory (adjust if your data root is elsewhere)
+    base_dir = os.path.abspath("data")
+
+    # Build path to the GLB
+    glb_path = os.path.join(
+        base_dir,
+        f"user_{owner_id}",
+        f"scene_{scene_id}",
+        "final",
+        "model.glb",    # ← change if your filename differs
+    )
+
+    if not os.path.isfile(glb_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="3D model not found"
+        )
+
+    return FileResponse(
+        path=glb_path,
+        media_type="model/gltf-binary",
+        filename=f"scene_{scene_id}.glb"
+    )
