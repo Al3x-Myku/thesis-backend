@@ -1,9 +1,10 @@
 import os
 import traceback
 import re
+import math
 import torch
 import numpy as np
-import time
+
 from pathlib import Path
 from typing import List
 from PIL import Image
@@ -22,30 +23,24 @@ from hy3dgen.texgen import Hunyuan3DPaintPipeline
 from .dfine_wrapper import run_dfine_inference
 
 # ─── Config from .env ──────────────────────────────────────────────────────────
-DFINE_ROOT = os.getenv("DFINE_ROOT", "./D-FINE")
-DFINE_CONFIG = os.getenv("DFINE_CONFIG", "configs/dfine/objects365/dfine_hgnetv2_x_obj365.yml")
-DFINE_CHECKPT = os.getenv("DFINE_CHECKPT", "checkpoints/dfine_x_obj365.pth")
-DEVICE = os.getenv("PIPELINE_DEVICE", "cuda:0")
+DFINE_ROOT     = os.getenv("DFINE_ROOT", "./D-FINE")
+DFINE_CONFIG   = os.getenv("DFINE_CONFIG", "configs/dfine/objects365/dfine_hgnetv2_x_obj365.yml")
+DFINE_CHECKPT  = os.getenv("DFINE_CHECKPT", "checkpoints/dfine_x_obj365.pth")
+DEVICE         = os.getenv("PIPELINE_DEVICE", "cuda:0")
 
-HUNYUAN_SHAPEDIR = os.getenv("HUNYUAN_SHAPEDIR", "tencent/Hunyuan3D-2mini")
+HUNYUAN_SHAPEDIR           = os.getenv("HUNYUAN_SHAPEDIR", "tencent/Hunyuan3D-2mini")
 HUNYUAN_SHAPEDIR_SUBFOLDER = os.getenv("HUNYUAN_SHAPEDIR_SUBFOLDER", "hunyuan3d-dit-v2-mini")
-HUNYUAN_SHAPEDIR_VARIANT = os.getenv("HUNYUAN_SHAPEDIR_VARIANT", "fp16")
-HUNYUAN_PAINTDIR = os.getenv("HUNYUAN_PAINTDIR", "tencent/Hunyuan3D-2")
+HUNYUAN_SHAPEDIR_VARIANT   = os.getenv("HUNYUAN_SHAPEDIR_VARIANT", "fp16")
+HUNYUAN_PAINTDIR           = os.getenv("HUNYUAN_PAINTDIR", "tencent/Hunyuan3D-2")
 
 # ─── Lazy singletons ──────────────────────────────────────────────────────────
-_shape_pipeline = None
-_paint_pipeline = None
-_depth_model = None
-
-
-def log(msg: str):
-    print(f"[LOG] {msg}")
-
+_shape_pipeline  = None
+_paint_pipeline  = None
+_depth_model     = None
 
 def _init_hunyuan_pipelines():
     global _shape_pipeline, _paint_pipeline
     if _shape_pipeline is None:
-        log("Initializing shape generation pipeline...")
         kwargs = {}
         if HUNYUAN_SHAPEDIR_SUBFOLDER:
             kwargs["subfolder"] = HUNYUAN_SHAPEDIR_SUBFOLDER
@@ -54,36 +49,29 @@ def _init_hunyuan_pipelines():
         _shape_pipeline = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
             HUNYUAN_SHAPEDIR, **kwargs
         )
-        log("Shape generation pipeline initialized.")
-
     if _paint_pipeline is None:
-        log("Initializing texture painting pipeline...")
         _paint_pipeline = Hunyuan3DPaintPipeline.from_pretrained(HUNYUAN_PAINTDIR)
-        log("Texture painting pipeline initialized.")
-
 
 def _init_zoe_depth():
+    """Lazy-load ZoeDepth_NK for depth estimation."""
     global _depth_model
     if _depth_model is None:
-        log("Initializing ZoeDepth model...")
         repo = "isl-org/ZoeDepth"
-        _depth_model = torch.hub.load(repo, "ZoeD_NK", pretrained=False, trust_repo=True).eval().cuda()
+        _depth_model = torch.hub.load(
+            repo, "ZoeD_NK", pretrained=False, trust_repo=True
+        ).eval().cuda()
         url = "https://github.com/isl-org/ZoeDepth/releases/download/v1.0/ZoeD_M12_NK.pt"
-        sd = load_state_dict_from_url(url, progress=True, map_location="cpu")
+        sd  = load_state_dict_from_url(url, progress=True, map_location="cpu")
         _depth_model.load_state_dict(sd, strict=False)
-        log("ZoeDepth model initialized.")
+        for m in _depth_model.modules():
+            if hasattr(m, "drop_path1") and not hasattr(m, "drop_path"):
+                m.drop_path = m.drop_path1
     return _depth_model
 
-
-def detect_objects(image_path: str, scene_folder: str, threshold: float = 0.6) -> List[str]:
-    start_time = time.time()
-    log("Starting object detection...")
-
-    # Prepare output directory
+def detect_objects(image_path: str, scene_folder: str) -> List[str]:
     crop_dir = Path(scene_folder) / "crops"
     crop_dir.mkdir(parents=True, exist_ok=True)
 
-    # Run D-FINE inference to crop objects
     run_dfine_inference(
         dfine_root=DFINE_ROOT,
         config_path=DFINE_CONFIG,
@@ -93,39 +81,27 @@ def detect_objects(image_path: str, scene_folder: str, threshold: float = 0.6) -
         output_dir=str(crop_dir),
     )
 
-    # Gather and sort crop file paths
     pattern = re.compile(r"crop(\d+)")
     crops = []
-    for ext in ("png", "jpg", "jpeg"):
+    for ext in ("png","jpg","jpeg"):
         for p in crop_dir.rglob(f"input_crop*.{ext}"):
             m = pattern.search(p.name)
             if m:
                 crops.append((int(m.group(1)), str(p)))
-
     if not crops:
         raise RuntimeError(f"No crops found in {crop_dir}")
-
-    crops_sorted = [path for _, path in sorted(crops, key=lambda x: x[0])]
-    log(f"Detected {len(crops_sorted)} object(s) in {time.time() - start_time:.2f}s.")
-    return crops_sorted
-
+    return [path for _, path in sorted(crops, key=lambda x: x[0])]
 
 def build_mesh(crop_path: str, scene_folder: str) -> str:
-    start_time = time.time()
-    log(f"Building mesh from crop: {crop_path}")
-
     _init_hunyuan_pipelines()
     image = Image.open(crop_path).convert("RGB")
-    base = Path(crop_path).stem
+    base  = Path(crop_path).stem
 
-    # Remove background
     rembg = BackgroundRemover()
     image_no_bg = rembg(image)
-    no_bg_path = Path(crop_path).with_name(f"{base}_no_bg.png")
+    no_bg_path  = Path(crop_path).with_name(f"{base}_no_bg.png")
     image_no_bg.save(no_bg_path)
-    log(f"Background removed: {no_bg_path}")
 
-    # Generate raw mesh
     out_dir = Path(scene_folder) / "meshes" / base
     out_dir.mkdir(parents=True, exist_ok=True)
     mesh = _shape_pipeline(
@@ -136,24 +112,15 @@ def build_mesh(crop_path: str, scene_folder: str) -> str:
         generator=torch.manual_seed(12345),
         output_type="trimesh",
     )[0]
-    raw_path = out_dir / f"{base}_raw.glb"
-    mesh.export(raw_path)
-    log(f"Raw mesh exported: {raw_path}")
+    mesh.export(out_dir / f"{base}_raw.glb")
 
-    # Clean mesh
     for cleaner in (FloaterRemover(), DegenerateFaceRemover(), FaceReducer()):
         mesh = cleaner(mesh)
-    log("Mesh cleaned.")
 
-    # Texture painting
     painted = _paint_pipeline(mesh, image=image_no_bg)
-    textured_path = out_dir / f"{base}_textured.glb"
-    painted.export(textured_path)
-    log(f"Textured mesh exported: {textured_path}")
-
-    log(f"Mesh building took {time.time() - start_time:.2f}s.")
-    return str(textured_path)
-
+    out_path = out_dir / f"{base}_textured.glb"
+    painted.export(out_path)
+    return str(out_path)
 
 def position_meshes(
     mesh_paths: List[str],
@@ -161,15 +128,18 @@ def position_meshes(
     scene_folder: str,
     threshold: float = 0.6
 ) -> str:
-    start_time = time.time()
-    log("Positioning meshes in scene...")
-
-    # Load image and compute center
+    """
+    Given a list of textured mesh paths, re-detects bounding boxes,
+    estimates depth-map on CPU, calibrates focal length from the first mesh,
+    sorts left→right and positions meshes in 3D.
+    Exports scene_positioned.glb under scene_folder/final/.
+    """
+    # 1) Load image and get its center
     image = Image.open(image_path).convert("RGB")
     W, H = image.size
     cx, cy = W / 2, H / 2
 
-    # Object detection on full scene for bounding boxes
+    # 2) Run D-FINE object detection
     processor = AutoImageProcessor.from_pretrained("ustc-community/dfine_x_obj365")
     model_det = DFineForObjectDetection.from_pretrained("ustc-community/dfine_x_obj365")
     inputs = processor(images=image, return_tensors="pt")
@@ -178,29 +148,28 @@ def position_meshes(
     results = processor.post_process_object_detection(
         outputs, target_sizes=[(H, W)], threshold=threshold
     )[0]
-    boxes = results["boxes"].cpu().numpy()
+    boxes = results["boxes"].cpu().numpy()  # (N,4)
 
-    # Depth estimation
+    # 3) Estimate depth-map on CPU to match types
     model_zoe = _init_zoe_depth()
     model_cpu = model_zoe.cpu()
-    depth_map = model_cpu.infer_pil(image)
+    depth_map = model_cpu.infer_pil(image)  # H×W numpy array
     model_zoe.cuda()
 
-    # Sort by x coordinate
+    # 4) Sort detections and mesh_paths from left to right
     order = np.argsort(boxes[:, 0])
     boxes_sorted = boxes[order]
     meshes_sorted = [mesh_paths[i] for i in order][: len(boxes_sorted)]
 
-    # Calibrate focal length
+    # 5) Calibrate focal length using the first mesh
     mesh_ref = trimesh.load(meshes_sorted[0], force="scene")
-    w_mesh = float(mesh_ref.extents[0])
+    w_mesh = float(mesh_ref.extents[0])                # model-unit width
     x0, y0, x1, y1 = boxes_sorted[0].astype(int)
-    pix_w = x1 - x0
-    Z_ref = float(np.median(depth_map[y0:y1, x0:x1]))
-    f = pix_w * Z_ref / w_mesh
-    log(f"Calibrated focal length: {f:.2f}")
+    pix_w = x1 - x0                                    # pixel width
+    Z_ref = float(np.median(depth_map[y0:y1, x0:x1]))  # depth in meters
+    f = pix_w * Z_ref / w_mesh                         # focal length in px
 
-    # Create scene and position each mesh
+    # 6) Place each mesh in the scene
     scene = trimesh.Scene()
     for i, (mp, bb) in enumerate(zip(meshes_sorted, boxes_sorted)):
         x0, y0, x1, y1 = bb.astype(int)
@@ -215,55 +184,37 @@ def position_meshes(
         mesh = trimesh.load(mp, force="scene")
         mesh.apply_translation([X, Y, Z])
         scene.add_geometry(mesh, node_name=f"obj_{i}")
-    
-    # Export final positioned scene
+
+    # 7) Export final positioned scene
     out_dir = Path(scene_folder) / "final"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "scene_positioned.glb"
     scene.export(str(out_path))
-
-    log(f"Positioning took {time.time() - start_time:.2f}s.")
     return str(out_path)
 
-
 def full_reconstruction(image_path: str, scene_folder: str) -> str:
-    total_start = time.time()
-    log("Starting full reconstruction pipeline...")
-
-    # Detect and crop objects
     try:
         crops = detect_objects(image_path, scene_folder)
-    except Exception:
+    except:
         traceback.print_exc()
         raise
 
-    # Build meshes for each crop
-    mesh_paths = []
+    meshes = []
     for crop in crops:
         try:
-            mesh_paths.append(build_mesh(crop, scene_folder))
-        except Exception:
+            meshes.append(build_mesh(crop, scene_folder))
+        except:
             traceback.print_exc()
             continue
 
-    # Position meshes
-    final_scene = position_meshes(mesh_paths, image_path, scene_folder)
-    log(f"Full reconstruction total time: {time.time() - total_start:.2f}s.")
-    return final_scene
-
+    return position_meshes(meshes, image_path, scene_folder)
 
 def merge_meshes(mesh_paths: List[str], scene_folder: str) -> str:
-    start_time = time.time()
-    log("Merging meshes...")
-
     out_dir = Path(scene_folder) / "final"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "scene_merged.glb"
 
-    # Load and concatenate scenes
-    scenes = [trimesh.load(mp, force="scene") for mp in mesh_paths]
-    merged = trimesh.util.concatenate(scenes)
-    merged.export(str(out_path))
-
-    log(f"Merging took {time.time() - start_time:.2f}s.")
+    meshes = [trimesh.load(mp, force="scene") for mp in mesh_paths]
+    merged_scene = trimesh.util.concatenate(meshes)
+    merged_scene.export(str(out_path))
     return str(out_path)
