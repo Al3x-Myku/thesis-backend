@@ -37,7 +37,10 @@ def get_scene_status(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Scene not found")
     return SceneRead.from_orm(scene)
 
-
+@router.get(
+    "/{scene_id}/download",
+    summary="Download the final .glb for a scene"
+)
 def download_scene(
     owner_id: int = Path(..., description="ID of the scene owner"),
     scene_id: int = Path(..., description="ID of the scene"),
