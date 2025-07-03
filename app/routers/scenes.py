@@ -54,7 +54,7 @@ def download_scene(
         f"user_{owner_id}",
         f"scene_{scene_id}",
         "final",
-        "model.glb",    # ← change if your filename differs
+        "scene_positioned.glb",    # ← change if your filename differs
     )
 
     if not os.path.isfile(glb_path):
