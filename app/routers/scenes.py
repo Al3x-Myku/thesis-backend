@@ -3,10 +3,11 @@ from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, status,
 from fastapi.responses import FileResponse
 from typing import List
 import os
-from app.core.config import settings
+
 from sqlmodel import Session
 from app.database import get_db
-from app.core.security import get_current_user    
+from app.core.config import settings
+from app.core.security import get_current_user
 from app.models.scene import SceneRead
 from app.services.scene_service import (
     create_and_enqueue_scene,
@@ -16,6 +17,7 @@ from app.services.scene_service import (
 
 router = APIRouter(prefix="/scenes", tags=["scenes"])
 
+
 @router.post(
     "/",
     response_model=SceneRead,
@@ -23,7 +25,7 @@ router = APIRouter(prefix="/scenes", tags=["scenes"])
 )
 async def create_scene(
     file: UploadFile = File(...),
-    current_user = Depends(get_current_user),        # <— inject the logged-in user
+    current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
@@ -40,8 +42,8 @@ async def create_scene(
     summary="List all scenes for the current user"
 )
 def list_my_scenes(
-    current_user = Depends(get_current_user),
-    db: Session      = Depends(get_db),
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
     Returns all scenes (creations) belonging to the logged-in user.
@@ -57,7 +59,7 @@ def list_my_scenes(
 )
 def get_scene_status(
     scene_id: int = Path(..., description="The ID of the scene to fetch"),
-    db: Session  = Depends(get_db),
+    db: Session = Depends(get_db),
 ):
     """
     Fetch the status (and metadata) of a specific Scene.
@@ -71,25 +73,61 @@ def get_scene_status(
     return SceneRead.from_orm(scene)
 
 
+@router.delete(
+    "/{scene_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a scene"
+)
+def delete_scene(
+    scene_id: int = Path(..., description="The ID of the scene to delete"),
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Delete a scene owned by the authenticated user.
+    """
+    scene = fetch_status(db, scene_id)
+    if not scene or scene.owner_id != current_user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Scene not found or not owned by you.")
+    # Here you would also delete files on disk if desired...
+    from app.services.scene_service import delete_scene as svc_delete
+    svc_delete(db, scene_id)
+    return None
+
+
 @router.get(
     "/{scene_id}/download",
+    response_class=FileResponse,
     status_code=status.HTTP_200_OK,
+    summary="Download the final .glb file for a completed scene"
 )
 def download_scene(
     scene_id: int = Path(..., description="The ID of the scene to download"),
-    db: Session  = Depends(get_db),
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
-    Stream the final .glb file for a completed Scene.
+    Stream the final .glb file for a completed Scene, only if owned by the current user.
     """
-    # locate file on disk (your existing logic)
-    base = os.path.join("data", f"user_{scene.owner_id}", f"scene_{scene_id}", "final")
+    scene = fetch_status(db, scene_id)
+    if not scene or scene.owner_id != current_user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Scene not found or not owned by you.")
+
+    # Build path to the final glb
+    data_dir = getattr(settings, "DATA_DIR", os.getenv("DATA_DIR", "./data"))
+    base = os.path.join(
+        data_dir,
+        f"user_{current_user.id}",
+        f"scene_{scene_id}",
+        "final"
+    )
     glb_path = os.path.join(base, "scene_positioned.glb")
     if not os.path.isfile(glb_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="3D model not found"
         )
+
     return FileResponse(
         path=glb_path,
         media_type="model/gltf-binary",
@@ -105,14 +143,12 @@ def download_scene(
 )
 def get_scene_input(
     scene_id: int = Path(..., description="ID of the scene"),
-    current_user = Depends(get_current_user),
-    db: Session   = Depends(get_db),
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """
-    Returns the raw 2D image that was uploaded for this scene,
-    provided it belongs to the authenticated user.
+    Returns the raw 2D image that was uploaded for this scene, provided it belongs to the authenticated user.
     """
-    # 1) fetch scene record (so we can verify ownership)
     scene = fetch_status(db, scene_id)
     if not scene or scene.owner_id != current_user.id:
         raise HTTPException(
@@ -120,8 +156,6 @@ def get_scene_input(
             detail="Scene not found or not owned by you."
         )
 
-    # 2) compute the path where you saved the original upload
-    #    adjust this to match your service's actual file layout
     data_dir = getattr(settings, "DATA_DIR", os.getenv("DATA_DIR", "./data"))
     input_path = os.path.join(
         data_dir,
@@ -129,12 +163,13 @@ def get_scene_input(
         f"scene_{scene_id}",
         "input.png"
     )
-    # 3) validate and return
+
     if not os.path.isfile(input_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Original input image not found on server."
         )
+
     return FileResponse(
         path=input_path,
         media_type="image/png",
