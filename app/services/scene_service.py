@@ -6,6 +6,9 @@ from app.repositories.scene_repo import create_scene_record, get_scene
 from app.models.scene import Scene
 from app.celery_app import celery_app
 from app.reconstructor_pipeline import detect_objects, build_mesh, merge_meshes
+from typing import List
+from sqlmodel import Session
+from app.repositories.scene_repo import get_scenes_by_owner
 
 DATA_ROOT = Path(__import__("os").getenv("DATA_DIR", "./data"))
 
@@ -38,3 +41,7 @@ def create_and_enqueue_scene(
 
 def fetch_status(db: Session, scene_id: int) -> Scene:
     return get_scene(db, scene_id)
+
+
+def list_scenes_for_user(db: Session, owner_id: int) -> List[Scene]:
+    return get_scenes_by_owner(db, owner_id)
