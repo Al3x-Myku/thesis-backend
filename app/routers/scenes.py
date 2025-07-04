@@ -13,6 +13,7 @@ from app.services.scene_service import (
     create_and_enqueue_scene,
     fetch_status,
     list_scenes_for_user,
+    delete_scene as svc_delete_scene
 )
 
 router = APIRouter(prefix="/scenes", tags=["scenes"])
@@ -89,9 +90,7 @@ def delete_scene(
     scene = fetch_status(db, scene_id)
     if not scene or scene.owner_id != current_user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Scene not found or not owned by you.")
-    # Here you would also delete files on disk if desired...
-    from app.services.scene_service import delete_scene as svc_delete
-    svc_delete(db, scene_id)
+    svc_delete_scene(db, scene_id, current_user.id)
     return None
 
 

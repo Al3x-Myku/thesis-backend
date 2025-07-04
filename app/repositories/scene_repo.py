@@ -24,3 +24,10 @@ def get_scene(db: Session, scene_id: int) -> Optional[Scene]:
 def get_scenes_by_owner(db: Session, owner_id: int) -> List[Scene]:
     stmt = select(Scene).where(Scene.owner_id == owner_id)
     return db.exec(stmt).all()
+
+def get_scene_by_id(db: Session, scene_id: int) -> Scene | None:
+    return db.get(Scene, scene_id)
+
+def delete_scene(db: Session, scene: Scene) -> None:
+    db.delete(scene)
+    db.commit()
