@@ -1,8 +1,5 @@
-from sqlmodel import Session
-from typing import Optional
-from app.models.scene import Scene
-from typing import List
-from sqlmodel import Session, select
+from typing        import Optional, List
+from sqlmodel      import Session, select
 from app.models.scene import Scene
 
 def create_scene_record(
@@ -25,7 +22,7 @@ def get_scenes_by_owner(db: Session, owner_id: int) -> List[Scene]:
     stmt = select(Scene).where(Scene.owner_id == owner_id)
     return db.exec(stmt).all()
 
-def get_scene_by_id(db: Session, scene_id: int) -> Scene | None:
+def get_scene_by_id(db: Session, scene_id: int) -> Optional[Scene]:
     return db.get(Scene, scene_id)
 
 def delete_scene(db: Session, scene: Scene) -> None:
