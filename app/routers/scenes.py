@@ -133,6 +133,22 @@ def download_scene(
         filename=f"scene_{scene_id}.glb"
     )
 
+@router.get(
+    "/{owner_id}/{scene_id}/download",
+    response_class=FileResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Alias: Download the final .glb (owner + scene)"
+)
+def download_scene_alias(
+    owner_id: int = Path(...),
+    scene_id: int = Path(...),
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # ignore owner_id in the URL and delegate to your existing logic:
+    return download_scene(scene_id=scene_id, current_user=current_user, db=db)
+
+
 
 @router.get(
     "/{scene_id}/input",
