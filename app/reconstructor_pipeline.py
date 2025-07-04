@@ -122,17 +122,43 @@ def build_mesh(crop_path: str, scene_folder: str) -> str:
     painted.export(out_path)
     return str(out_path)
 
+def full_reconstruction(image_path: str, scene_folder: str) -> str:
+    try:
+        crops = detect_objects(image_path, scene_folder)
+    except:
+        traceback.print_exc()
+        raise
+
+    meshes = []
+    valid_crop_indices = []
+    for idx, crop in enumerate(crops):
+        try:
+            mesh_path = build_mesh(crop, scene_folder)
+            meshes.append(mesh_path)
+            valid_crop_indices.append(idx)
+        except:
+            traceback.print_exc()
+            continue
+
+    return position_meshes(
+        mesh_paths=meshes,
+        image_path=image_path,
+        scene_folder=scene_folder,
+        valid_indices=valid_crop_indices
+    )
+
 def position_meshes(
     mesh_paths: List[str],
     image_path: str,
     scene_folder: str,
+    valid_indices: List[int] = None,
     threshold: float = 0.6
 ) -> str:
     """
-    Given a list of textured mesh paths, re-detects bounding boxes,
-    estimates depth-map on CPU, calibrates focal length from the first mesh,
-    sorts left→right and positions meshes in 3D.
-    Exports scene_positioned.glb under scene_folder/final/.
+    Given a list of textured mesh paths, filters out any detections whose
+    meshes failed, re-detects bounding boxes, estimates depth-map on CPU,
+    calibrates focal length from the first mesh, sorts left→right and positions
+    meshes in 3D. Exports scene_positioned.glb under scene_folder/final/.
     """
     # 1) Load image and get its center
     image = Image.open(image_path).convert("RGB")
@@ -150,16 +176,20 @@ def position_meshes(
     )[0]
     boxes = results["boxes"].cpu().numpy()  # (N,4)
 
+    # 2.1) Filter out boxes whose crops failed
+    if valid_indices is not None:
+        boxes = boxes[valid_indices]
+
     # 3) Estimate depth-map on CPU to match types
     model_zoe = _init_zoe_depth()
     model_cpu = model_zoe.cpu()
-    depth_map = model_cpu.infer_pil(image)  # H×W numpy array
+    depth_map = model_cpu.infer_pil(image)
     model_zoe.cuda()
 
     # 4) Sort detections and mesh_paths from left to right
     order = np.argsort(boxes[:, 0])
     boxes_sorted = boxes[order]
-    meshes_sorted = [mesh_paths[i] for i in order][: len(boxes_sorted)]
+    meshes_sorted = [mesh_paths[i] for i in order]
 
     # 5) Calibrate focal length using the first mesh
     mesh_ref = trimesh.load(meshes_sorted[0], force="scene")
@@ -191,23 +221,6 @@ def position_meshes(
     out_path = out_dir / "scene_positioned.glb"
     scene.export(str(out_path))
     return str(out_path)
-
-def full_reconstruction(image_path: str, scene_folder: str) -> str:
-    try:
-        crops = detect_objects(image_path, scene_folder)
-    except:
-        traceback.print_exc()
-        raise
-
-    meshes = []
-    for crop in crops:
-        try:
-            meshes.append(build_mesh(crop, scene_folder))
-        except:
-            traceback.print_exc()
-            continue
-
-    return position_meshes(meshes, image_path, scene_folder)
 
 def merge_meshes(mesh_paths: List[str], scene_folder: str) -> str:
     out_dir = Path(scene_folder) / "final"
