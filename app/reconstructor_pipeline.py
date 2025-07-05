@@ -8,12 +8,16 @@ import numpy as np
 from pathlib import Path
 from typing import List
 from PIL import Image
-from transformers import DFineForObjectDetection, AutoImageProcessor, AutoModelForImageSegmentation
+from transformers import (
+    DFineForObjectDetection,
+    AutoImageProcessor,
+    AutoModelForImageSegmentation,
+)
 from torchvision import transforms
 from torch.hub import load_state_dict_from_url
 import trimesh
 
-from hy3dgen.shapegen import (
+from hy3dgen.shapgen import (
     Hunyuan3DDiTFlowMatchingPipeline,
     FaceReducer,
     FloaterRemover,
@@ -23,10 +27,10 @@ from hy3dgen.texgen import Hunyuan3DPaintPipeline
 from .dfine_wrapper import run_dfine_inference
 
 # ─── Config from .env ──────────────────────────────────────────────────────────
-DFINE_ROOT     = os.getenv("DFINE_ROOT", "./D-FINE")
-DFINE_CONFIG   = os.getenv("DFINE_CONFIG", "configs/dfine/objects365/dfine_hgnetv2_x_obj365.yml")
-DFINE_CHECKPT  = os.getenv("DFINE_CHECKPT", "checkpoints/dfine_x_obj365.pth")
-PIPELINE_DEVICE= os.getenv("PIPELINE_DEVICE", "cuda:0")
+DFINE_ROOT      = os.getenv("DFINE_ROOT", "./D-FINE")
+DFINE_CONFIG    = os.getenv("DFINE_CONFIG", "configs/dfine/objects365/dfine_hgnetv2_x_obj365.yml")
+DFINE_CHECKPT   = os.getenv("DFINE_CHECKPT", "checkpoints/dfine_x_obj365.pth")
+PIPELINE_DEVICE = os.getenv("PIPELINE_DEVICE", "cuda:0")
 
 HUNYUAN_SHAPEDIR           = os.getenv("HUNYUAN_SHAPEDIR", "tencent/Hunyuan3D-2mini")
 HUNYUAN_SHAPEDIR_SUBFOLDER = os.getenv("HUNYUAN_SHAPEDIR_SUBFOLDER", "hunyuan3d-dit-v2-mini")
@@ -40,8 +44,10 @@ _depth_model     = None
 
 # ─── BiRefNet segmentation setup ────────────────────────────────────────────────
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# Improve CUDA matmul precision
 torch.set_float32_matmul_precision("high")
 
+# Load BiRefNet once
 birefnet = AutoModelForImageSegmentation.from_pretrained(
     "ZhengPeng7/BiRefNet", trust_remote_code=True
 ).to(DEVICE)
@@ -53,12 +59,28 @@ transform_seg = transforms.Compose([
                          [0.229, 0.224, 0.225]),
 ])
 
+
 def remove_bg_biref(image: Image.Image) -> Image.Image:
     """Run BiRefNet to get a soft mask, threshold, and compose RGBA."""
-    inp = transform_seg(image).unsqueeze(0).to(DEVICE)
-    with torch.no_grad():
-        mask_logits = birefnet(inp)[-1]       # (1,1,H,W)
-        mask = mask_logits.sigmoid()[0,0].cpu().numpy()
+    try:
+        inp = transform_seg(image).unsqueeze(0).to(DEVICE)
+        with torch.no_grad():
+            mask_logits = birefnet(inp)[-1]       # (1,1,H,W)
+            mask = mask_logits.sigmoid()[0,0].cpu().numpy()
+    except torch.cuda.OutOfMemoryError:
+        # clear cache and downsample on OOM
+        torch.cuda.empty_cache()
+        small = image.resize((512, 512))
+        inp = transform_seg(small).unsqueeze(0).to(DEVICE)
+        with torch.no_grad():
+            mask_logits = birefnet(inp)[-1]
+            mask_small = mask_logits.sigmoid()[0,0].cpu().numpy()
+        # upsample mask back to original size
+        mask = np.array(
+            Image.fromarray((mask_small * 255).astype(np.uint8))
+            .resize(image.size)
+        ) / 255.0
+
     alpha = (mask * 255).astype(np.uint8)
     alpha_im = Image.fromarray(alpha).resize(image.size)
     out = image.convert("RGBA")
@@ -157,7 +179,7 @@ def build_mesh(crop_path: str, scene_folder: str) -> str:
 def full_reconstruction(image_path: str, scene_folder: str) -> str:
     try:
         crops = detect_objects(image_path, scene_folder)
-    except:
+    except Exception:
         traceback.print_exc()
         raise
 
@@ -168,9 +190,14 @@ def full_reconstruction(image_path: str, scene_folder: str) -> str:
             mesh_path = build_mesh(crop, scene_folder)
             meshes.append(mesh_path)
             valid_crop_indices.append(idx)
-        except:
+        except Exception:
             traceback.print_exc()
-            continue
+
+    if not meshes:
+        raise RuntimeError(
+            f"No meshes could be built for any of the {len(crops)} crops. "
+            "Check if BiRefNet is OOM'ing or DFine crops are invalid."
+        )
 
     return position_meshes(
         mesh_paths=meshes,
