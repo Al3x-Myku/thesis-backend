@@ -17,7 +17,7 @@ from torchvision import transforms
 from torch.hub import load_state_dict_from_url
 import trimesh
 
-from hy3dgen.shapegen import (
+from hy3dgen.shapgen import (
     Hunyuan3DDiTFlowMatchingPipeline,
     FaceReducer,
     FloaterRemover,
@@ -223,18 +223,22 @@ def position_meshes(
     boxes_sorted = boxes[order]
     meshes_sorted = [mesh_paths[i] for i in order]
 
-    # calibrate focal length using all objects, take median
+        # calibrate focal length using the object with largest pixel width
     f_vals = []
+    pix_ws = []
     for mp, bb in zip(meshes_sorted, boxes_sorted):
         mesh_ref = trimesh.load(mp, force="scene")
         w_mesh = float(mesh_ref.extents[0])
         x0, y0, x1, y1 = bb.astype(int)
         pix_w = x1 - x0
+        pix_ws.append(pix_w)
         Z_ref = float(np.median(depth_map[y0:y1, x0:x1]))
         f_vals.append(pix_w * Z_ref / w_mesh)
     if not f_vals:
         raise RuntimeError("Cannot calibrate focal length: no valid meshes/depth.")
-    f = float(np.median(f_vals))
+    # pick focal length from the detection with largest pixel width (most reliable)
+    idx_max = int(np.argmax(pix_ws))
+    f = float(f_vals[idx_max])
 
     # place meshes
     scene = trimesh.Scene()
