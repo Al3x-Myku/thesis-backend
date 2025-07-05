@@ -17,7 +17,7 @@ from torchvision import transforms
 from torch.hub import load_state_dict_from_url
 import trimesh
 
-from hy3dgen.shapgen import (
+from hy3dgen.shapegen import (
     Hunyuan3DDiTFlowMatchingPipeline,
     FaceReducer,
     FloaterRemover,
