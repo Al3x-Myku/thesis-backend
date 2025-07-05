@@ -8,7 +8,7 @@ from app.celery_app import celery_app
 from app.database import engine
 from sqlmodel import Session
 from app.models.scene import Scene, SceneStatus
-from app.reconstructor_pipeline import full_reconstruction
+from app.reconstructor_pipeline import cleanup_gpu, full_reconstruction
 
 @celery_app.task(bind=True)
 def reconstruct_scene(self, scene_id: int) -> str:
@@ -34,6 +34,9 @@ def reconstruct_scene(self, scene_id: int) -> str:
             session.commit()
         # re-raise so Celery records the failure
         raise
+    finally:
+        # Cleanup GPU memory
+        cleanup_gpu()
 
     # 3) Mark COMPLETE
     with Session(engine) as session:

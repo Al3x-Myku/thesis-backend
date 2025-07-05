@@ -311,3 +311,16 @@ def merge_meshes(mesh_paths: List[str], scene_folder: str) -> str:
     merged_scene = trimesh.util.concatenate(meshes)
     merged_scene.export(str(out_path))
     return str(out_path)
+
+import gc
+import torch
+
+def cleanup_gpu():
+    # Only reset the depth model
+    global _depth_model
+    if _depth_model is not None:
+        _depth_model.cpu()         # move weights off of CUDA
+        _depth_model = None
+    # keep _shape_pipeline and _paint_pipeline alive on GPU
+    gc.collect()
+    torch.cuda.empty_cache()
