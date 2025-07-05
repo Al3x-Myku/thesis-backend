@@ -189,7 +189,16 @@ def full_reconstruction(image_path: str, scene_folder: str) -> str:
         valid_indices=valid_crop_indices
     )
 
-# ─── Position meshes in scene ─────────────────────────────────────────────────
+from pathlib import Path
+from scipy.ndimage import median_filter
+
+def robust_depth(crop):
+    """
+    Compute robust depth estimate by ignoring extreme outliers.
+    """
+    valid_depths = crop[(crop > np.percentile(crop, 25)) & (crop < np.percentile(crop, 75))]
+    return np.median(valid_depths) if valid_depths.size > 0 else np.median(crop)
+
 def position_meshes(
     mesh_paths: List[str],
     image_path: str,
@@ -201,7 +210,7 @@ def position_meshes(
     W, H = image.size
     cx, cy = W / 2, H / 2
 
-    # run detection for updated boxes
+    # Run object detection for updated bounding boxes
     processor = AutoImageProcessor.from_pretrained("ustc-community/dfine_x_obj365")
     model_det = DFineForObjectDetection.from_pretrained("ustc-community/dfine_x_obj365")
     inputs = processor(images=image, return_tensors="pt")
@@ -214,52 +223,59 @@ def position_meshes(
     if valid_indices is not None:
         boxes = boxes[valid_indices]
 
-    # estimate depth map on CPU
+    # ZoeDepth: Estimate and median-filter the depth map for robustness
     model_zoe = _init_zoe_depth()
     depth_map = model_zoe.cpu().infer_pil(image)
+    depth_map = median_filter(depth_map, size=5)  # Robust depth map
     model_zoe.cuda()
 
-    # sort left→right
+    # Sort meshes left→right
     order = np.argsort(boxes[:, 0])
     boxes_sorted = boxes[order]
     meshes_sorted = [mesh_paths[i] for i in order]
 
-    # calibrate scale using the largest bounding-box area
-    areas = []
-    f_vals = []
+    # Improved focal length estimation (median-based)
+    focal_estimations = []
     for mp, bb in zip(meshes_sorted, boxes_sorted):
         x0, y0, x1, y1 = bb.astype(int)
         w_px = x1 - x0
-        h_px = y1 - y0
-        areas.append(w_px * h_px)
         mesh_ref = trimesh.load(mp, force="scene")
         w_mesh = float(mesh_ref.extents[0])
-        Z_ref = float(np.median(depth_map[y0:y1, x0:x1]))
-        f_vals.append(w_px * Z_ref / w_mesh)
-    if not areas:
-        raise RuntimeError("Cannot calibrate focal length: no valid detections.")
-    idx_largest = int(np.argmax(areas))
-    f = float(f_vals[idx_largest])
+        crop_depth = depth_map[y0:y1, x0:x1]
+        if crop_depth.size == 0:
+            continue
+        Z_ref = robust_depth(crop_depth)
+        focal_estimations.append(w_px * Z_ref / w_mesh)
 
-    # place each mesh
+    if not focal_estimations:
+        raise RuntimeError("No valid focal length estimates.")
+    f = np.median(focal_estimations)
+
+    # Place each mesh into the scene
     scene = trimesh.Scene()
     for i, (mp, bb) in enumerate(zip(meshes_sorted, boxes_sorted)):
         x0, y0, x1, y1 = bb.astype(int)
         xc, yc = (x0 + x1) / 2, (y0 + y1) / 2
-        crop = depth_map[y0:y1, x0:x1]
-        if crop.size == 0:
+
+        crop_depth = depth_map[y0:y1, x0:x1]
+        if crop_depth.size == 0:
             continue
-        Z = float(np.median(crop))
+
+        # Robust depth estimation
+        Z = robust_depth(crop_depth)
         X = (xc - cx) * Z / f
         Y = -(yc - cy) * Z / f
+
         mesh = trimesh.load(mp, force="scene")
         mesh.apply_translation([X, Y, Z])
         scene.add_geometry(mesh, node_name=f"obj_{i}")
 
+    # Export the final positioned scene
     out_dir = Path(scene_folder) / "final"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "scene_positioned.glb"
     scene.export(str(out_path))
+
     return str(out_path)
 
 # ─── Merge all meshes into one ─────────────────────────────────────────────────
