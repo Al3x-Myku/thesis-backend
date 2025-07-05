@@ -30,7 +30,7 @@ from .dfine_wrapper import run_dfine_inference
 DFINE_ROOT      = os.getenv("DFINE_ROOT", "./D-FINE")
 DFINE_CONFIG    = os.getenv("DFINE_CONFIG", "configs/dfine/objects365/dfine_hgnetv2_x_obj365.yml")
 DFINE_CHECKPT   = os.getenv("DFINE_CHECKPT", "checkpoints/dfine_x_obj365.pth")
-PIPELINE_DEVICE = os.getenv("PIPELINE_DEVICE", "cpu")  # force CPU for BiRefNet
+PIPELINE_DEVICE = os.getenv("PIPELINE_DEVICE", "cpu")  # BiRefNet CPU
 
 HUNYUAN_SHAPEDIR           = os.getenv("HUNYUAN_SHAPEDIR", "tencent/Hunyuan3D-2mini")
 HUNYUAN_SHAPEDIR_SUBFOLDER = os.getenv("HUNYUAN_SHAPEDIR_SUBFOLDER", "hunyuan3d-dit-v2-mini")
@@ -43,32 +43,22 @@ _paint_pipeline  = None
 _depth_model     = None
 
 # ─── BiRefNet segmentation setup ────────────────────────────────────────────────
-# Run BiRefNet entirely on CPU
 device = torch.device("cpu")
-
-# Load BiRefNet once to CPU
-birefnet = AutoModelForImageSegmentation.from_pretrained(
-    "ZhengPeng7/BiRefNet", trust_remote_code=True
-).to(device)
-
-# Full-resolution transform
 o_seg = transforms.Compose([
     transforms.Resize((1024, 1024)),
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406],
                          [0.229, 0.224, 0.225]),
 ])
-
+birefnet = AutoModelForImageSegmentation.from_pretrained(
+    "ZhengPeng7/BiRefNet", trust_remote_code=True
+).to(device)
 
 def remove_bg_biref(image: Image.Image) -> Image.Image:
-    """Run BiRefNet on CPU to get a soft mask and compose RGBA."""
-    # preprocess
     inp = o_seg(image).unsqueeze(0).to(device)
     with torch.no_grad():
-        mask_logits = birefnet(inp)[-1]       # (1,1,H,W)
+        mask_logits = birefnet(inp)[-1]
         mask = mask_logits.sigmoid()[0,0].cpu().numpy()
-
-    # compose RGBA
     alpha = (mask * 255).astype(np.uint8)
     alpha_im = Image.fromarray(alpha).resize(image.size)
     out = image.convert("RGBA")
@@ -203,17 +193,14 @@ def position_meshes(
     threshold: float = 0.6
 ) -> str:
     """
-    Given a list of textured mesh paths, filters out any detections whose
-    meshes failed, re-detects bounding boxes, estimates depth-map on CPU,
-    calibrates focal length from the first mesh, sorts left→right and positions
-    meshes in 3D. Exports scene_positioned.glb under scene_folder/final/.
+    Given textured meshes, re-detects bounding boxes, estimates depth, calibrates scale,
+    sorts left→right and positions meshes in 3D. Exports final scene.
     """
-    # 1) Load image and get its center
     image = Image.open(image_path).convert("RGB")
     W, H = image.size
     cx, cy = W / 2, H / 2
 
-    # 2) Run D-FINE object detection
+    # object detection
     processor = AutoImageProcessor.from_pretrained("ustc-community/dfine_x_obj365")
     model_det = DFineForObjectDetection.from_pretrained("ustc-community/dfine_x_obj365")
     inputs = processor(images=image, return_tensors="pt")
@@ -222,32 +209,34 @@ def position_meshes(
     results = processor.post_process_object_detection(
         outputs, target_sizes=[(H, W)], threshold=threshold
     )[0]
-    boxes = results["boxes"].cpu().numpy()  # (N,4)
-
-    # 2.1) Filter out boxes whose crops failed
+    boxes = results["boxes"].cpu().numpy()
     if valid_indices is not None:
         boxes = boxes[valid_indices]
 
-    # 3) Estimate depth-map on CPU to match types
+    # depth map on CPU
     model_zoe = _init_zoe_depth()
-    model_cpu = model_zoe.cpu()
-    depth_map = model_cpu.infer_pil(image)
+    depth_map = model_zoe.cpu().infer_pil(image)
     model_zoe.cuda()
 
-    # 4) Sort detections and mesh_paths from left to right
+    # sort left→right
     order = np.argsort(boxes[:, 0])
     boxes_sorted = boxes[order]
     meshes_sorted = [mesh_paths[i] for i in order]
 
-    # 5) Calibrate focal length using the first mesh
-    mesh_ref = trimesh.load(meshes_sorted[0], force="scene")
-    w_mesh = float(mesh_ref.extents[0])                # model-unit width
-    x0, y0, x1, y1 = boxes_sorted[0].astype(int)
-    pix_w = x1 - x0                                    # pixel width
-    Z_ref = float(np.median(depth_map[y0:y1, x0:x1]))  # depth in meters
-    f = pix_w * Z_ref / w_mesh                         # focal length in px
+    # calibrate focal length using all objects, take median
+    f_vals = []
+    for mp, bb in zip(meshes_sorted, boxes_sorted):
+        mesh_ref = trimesh.load(mp, force="scene")
+        w_mesh = float(mesh_ref.extents[0])
+        x0, y0, x1, y1 = bb.astype(int)
+        pix_w = x1 - x0
+        Z_ref = float(np.median(depth_map[y0:y1, x0:x1]))
+        f_vals.append(pix_w * Z_ref / w_mesh)
+    if not f_vals:
+        raise RuntimeError("Cannot calibrate focal length: no valid meshes/depth.")
+    f = float(np.median(f_vals))
 
-    # 6) Place each mesh in the scene
+    # place meshes
     scene = trimesh.Scene()
     for i, (mp, bb) in enumerate(zip(meshes_sorted, boxes_sorted)):
         x0, y0, x1, y1 = bb.astype(int)
@@ -258,12 +247,10 @@ def position_meshes(
         Z = float(np.median(crop))
         X = (xc - cx) * Z / f
         Y = -(yc - cy) * Z / f
-
         mesh = trimesh.load(mp, force="scene")
         mesh.apply_translation([X, Y, Z])
         scene.add_geometry(mesh, node_name=f"obj_{i}")
 
-    # 7) Export final positioned scene
     out_dir = Path(scene_folder) / "final"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "scene_positioned.glb"
