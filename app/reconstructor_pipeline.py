@@ -30,7 +30,7 @@ from .dfine_wrapper import run_dfine_inference
 DFINE_ROOT      = os.getenv("DFINE_ROOT", "./D-FINE")
 DFINE_CONFIG    = os.getenv("DFINE_CONFIG", "configs/dfine/objects365/dfine_hgnetv2_x_obj365.yml")
 DFINE_CHECKPT   = os.getenv("DFINE_CHECKPT", "checkpoints/dfine_x_obj365.pth")
-PIPELINE_DEVICE = os.getenv("PIPELINE_DEVICE", "cpu")  # BiRefNet CPU
+PIPELINE_DEVICE = os.getenv("PIPELINE_DEVICE", "cpu")  # Use CPU for BiRefNet segmentation
 
 HUNYUAN_SHAPEDIR           = os.getenv("HUNYUAN_SHAPEDIR", "tencent/Hunyuan3D-2mini")
 HUNYUAN_SHAPEDIR_SUBFOLDER = os.getenv("HUNYUAN_SHAPEDIR_SUBFOLDER", "hunyuan3d-dit-v2-mini")
@@ -43,6 +43,7 @@ _paint_pipeline  = None
 _depth_model     = None
 
 # ─── BiRefNet segmentation setup ────────────────────────────────────────────────
+# Run BiRefNet on CPU only
 device = torch.device("cpu")
 o_seg = transforms.Compose([
     transforms.Resize((1024, 1024)),
@@ -55,17 +56,18 @@ birefnet = AutoModelForImageSegmentation.from_pretrained(
 ).to(device)
 
 def remove_bg_biref(image: Image.Image) -> Image.Image:
+    """Run BiRefNet on CPU to get a soft mask and compose RGBA."""
     inp = o_seg(image).unsqueeze(0).to(device)
     with torch.no_grad():
         mask_logits = birefnet(inp)[-1]
-        mask = mask_logits.sigmoid()[0,0].cpu().numpy()
+        mask = mask_logits.sigmoid()[0, 0].cpu().numpy()
     alpha = (mask * 255).astype(np.uint8)
     alpha_im = Image.fromarray(alpha).resize(image.size)
     out = image.convert("RGBA")
     out.putalpha(alpha_im)
     return out
 
-
+# ─── Initialize Hunyuan pipelines ──────────────────────────────────────────────
 def _init_hunyuan_pipelines():
     global _shape_pipeline, _paint_pipeline
     if _shape_pipeline is None:
@@ -80,9 +82,8 @@ def _init_hunyuan_pipelines():
     if _paint_pipeline is None:
         _paint_pipeline = Hunyuan3DPaintPipeline.from_pretrained(HUNYUAN_PAINTDIR)
 
-
+# ─── Initialize ZoeDepth for depth estimation ─────────────────────────────────
 def _init_zoe_depth():
-    """Lazy-load ZoeDepth_NK for depth estimation."""
     global _depth_model
     if _depth_model is None:
         repo = "isl-org/ZoeDepth"
@@ -97,7 +98,7 @@ def _init_zoe_depth():
                 m.drop_path = m.drop_path1
     return _depth_model
 
-
+# ─── Object detection and cropping via D-FINE ──────────────────────────────────
 def detect_objects(image_path: str, scene_folder: str) -> List[str]:
     crop_dir = Path(scene_folder) / "crops"
     crop_dir.mkdir(parents=True, exist_ok=True)
@@ -113,26 +114,28 @@ def detect_objects(image_path: str, scene_folder: str) -> List[str]:
 
     pattern = re.compile(r"crop(\d+)")
     crops = []
-    for ext in ("png","jpg","jpeg"):
+    for ext in ("png", "jpg", "jpeg"):  # gather all crop files
         for p in crop_dir.rglob(f"input_crop*.{ext}"):
             m = pattern.search(p.name)
             if m:
                 crops.append((int(m.group(1)), str(p)))
     if not crops:
         raise RuntimeError(f"No crops found in {crop_dir}")
+    # return sorted by crop index
     return [path for _, path in sorted(crops, key=lambda x: x[0])]
 
-
+# ─── Build per-object mesh ─────────────────────────────────────────────────────
 def build_mesh(crop_path: str, scene_folder: str) -> str:
     _init_hunyuan_pipelines()
     image = Image.open(crop_path).convert("RGB")
     base  = Path(crop_path).stem
 
-    # background removal using BiRefNet
+    # background removal
     image_no_bg = remove_bg_biref(image)
     no_bg_path  = Path(crop_path).with_name(f"{base}_no_bg.png")
     image_no_bg.save(no_bg_path)
 
+    # shape reconstruction
     out_dir = Path(scene_folder) / "meshes" / base
     out_dir.mkdir(parents=True, exist_ok=True)
     mesh = _shape_pipeline(
@@ -145,15 +148,17 @@ def build_mesh(crop_path: str, scene_folder: str) -> str:
     )[0]
     mesh.export(out_dir / f"{base}_raw.glb")
 
+    # mesh cleanup
     for cleaner in (FloaterRemover(), DegenerateFaceRemover(), FaceReducer()):
         mesh = cleaner(mesh)
 
+    # texture painting
     painted = _paint_pipeline(mesh, image=image_no_bg)
     out_path = out_dir / f"{base}_textured.glb"
     painted.export(out_path)
     return str(out_path)
 
-
+# ─── Full scene reconstruction ─────────────────────────────────────────────────
 def full_reconstruction(image_path: str, scene_folder: str) -> str:
     try:
         crops = detect_objects(image_path, scene_folder)
@@ -173,8 +178,8 @@ def full_reconstruction(image_path: str, scene_folder: str) -> str:
 
     if not meshes:
         raise RuntimeError(
-            f"No meshes could be built for any of the {len(crops)} crops. "
-            "Check if BiRefNet is OOM'ing or DFine crops are invalid."
+            f"No meshes could be built for any of the {len(crops)} crops."
+            " Check background removal or crop validity."
         )
 
     return position_meshes(
@@ -184,7 +189,7 @@ def full_reconstruction(image_path: str, scene_folder: str) -> str:
         valid_indices=valid_crop_indices
     )
 
-
+# ─── Position meshes in scene ─────────────────────────────────────────────────
 def position_meshes(
     mesh_paths: List[str],
     image_path: str,
@@ -192,15 +197,11 @@ def position_meshes(
     valid_indices: List[int] = None,
     threshold: float = 0.6
 ) -> str:
-    """
-    Given textured meshes, re-detects bounding boxes, estimates depth, calibrates scale,
-    sorts left→right and positions meshes in 3D. Exports final scene.
-    """
     image = Image.open(image_path).convert("RGB")
     W, H = image.size
     cx, cy = W / 2, H / 2
 
-    # object detection
+    # run detection for updated boxes
     processor = AutoImageProcessor.from_pretrained("ustc-community/dfine_x_obj365")
     model_det = DFineForObjectDetection.from_pretrained("ustc-community/dfine_x_obj365")
     inputs = processor(images=image, return_tensors="pt")
@@ -213,7 +214,7 @@ def position_meshes(
     if valid_indices is not None:
         boxes = boxes[valid_indices]
 
-    # depth map on CPU
+    # estimate depth map on CPU
     model_zoe = _init_zoe_depth()
     depth_map = model_zoe.cpu().infer_pil(image)
     model_zoe.cuda()
@@ -223,24 +224,24 @@ def position_meshes(
     boxes_sorted = boxes[order]
     meshes_sorted = [mesh_paths[i] for i in order]
 
-        # calibrate focal length using the object with largest pixel width
+    # calibrate scale using the largest bounding-box area
+    areas = []
     f_vals = []
-    pix_ws = []
     for mp, bb in zip(meshes_sorted, boxes_sorted):
+        x0, y0, x1, y1 = bb.astype(int)
+        w_px = x1 - x0
+        h_px = y1 - y0
+        areas.append(w_px * h_px)
         mesh_ref = trimesh.load(mp, force="scene")
         w_mesh = float(mesh_ref.extents[0])
-        x0, y0, x1, y1 = bb.astype(int)
-        pix_w = x1 - x0
-        pix_ws.append(pix_w)
         Z_ref = float(np.median(depth_map[y0:y1, x0:x1]))
-        f_vals.append(pix_w * Z_ref / w_mesh)
-    if not f_vals:
-        raise RuntimeError("Cannot calibrate focal length: no valid meshes/depth.")
-    # pick focal length from the detection with largest pixel width (most reliable)
-    idx_max = int(np.argmax(pix_ws))
-    f = float(f_vals[idx_max])
+        f_vals.append(w_px * Z_ref / w_mesh)
+    if not areas:
+        raise RuntimeError("Cannot calibrate focal length: no valid detections.")
+    idx_largest = int(np.argmax(areas))
+    f = float(f_vals[idx_largest])
 
-    # place meshes
+    # place each mesh
     scene = trimesh.Scene()
     for i, (mp, bb) in enumerate(zip(meshes_sorted, boxes_sorted)):
         x0, y0, x1, y1 = bb.astype(int)
@@ -261,7 +262,7 @@ def position_meshes(
     scene.export(str(out_path))
     return str(out_path)
 
-
+# ─── Merge all meshes into one ─────────────────────────────────────────────────
 def merge_meshes(mesh_paths: List[str], scene_folder: str) -> str:
     out_dir = Path(scene_folder) / "final"
     out_dir.mkdir(parents=True, exist_ok=True)
