@@ -8,11 +8,11 @@ import numpy as np
 from pathlib import Path
 from typing import List
 from PIL import Image
-from transformers import DFineForObjectDetection, AutoImageProcessor
-import trimesh
+from transformers import DFineForObjectDetection, AutoImageProcessor, AutoModelForImageSegmentation
+from torchvision import transforms
 from torch.hub import load_state_dict_from_url
+import trimesh
 
-from hy3dgen.rembg import BackgroundRemover
 from hy3dgen.shapegen import (
     Hunyuan3DDiTFlowMatchingPipeline,
     FaceReducer,
@@ -26,7 +26,7 @@ from .dfine_wrapper import run_dfine_inference
 DFINE_ROOT     = os.getenv("DFINE_ROOT", "./D-FINE")
 DFINE_CONFIG   = os.getenv("DFINE_CONFIG", "configs/dfine/objects365/dfine_hgnetv2_x_obj365.yml")
 DFINE_CHECKPT  = os.getenv("DFINE_CHECKPT", "checkpoints/dfine_x_obj365.pth")
-DEVICE         = os.getenv("PIPELINE_DEVICE", "cuda:0")
+PIPELINE_DEVICE= os.getenv("PIPELINE_DEVICE", "cuda:0")
 
 HUNYUAN_SHAPEDIR           = os.getenv("HUNYUAN_SHAPEDIR", "tencent/Hunyuan3D-2mini")
 HUNYUAN_SHAPEDIR_SUBFOLDER = os.getenv("HUNYUAN_SHAPEDIR_SUBFOLDER", "hunyuan3d-dit-v2-mini")
@@ -37,6 +37,34 @@ HUNYUAN_PAINTDIR           = os.getenv("HUNYUAN_PAINTDIR", "tencent/Hunyuan3D-2"
 _shape_pipeline  = None
 _paint_pipeline  = None
 _depth_model     = None
+
+# ─── BiRefNet segmentation setup ────────────────────────────────────────────────
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+torch.set_float32_matmul_precision("high")
+
+birefnet = AutoModelForImageSegmentation.from_pretrained(
+    "ZhengPeng7/BiRefNet", trust_remote_code=True
+).to(DEVICE)
+
+transform_seg = transforms.Compose([
+    transforms.Resize((1024, 1024)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406],
+                         [0.229, 0.224, 0.225]),
+])
+
+def remove_bg_biref(image: Image.Image) -> Image.Image:
+    """Run BiRefNet to get a soft mask, threshold, and compose RGBA."""
+    inp = transform_seg(image).unsqueeze(0).to(DEVICE)
+    with torch.no_grad():
+        mask_logits = birefnet(inp)[-1]       # (1,1,H,W)
+        mask = mask_logits.sigmoid()[0,0].cpu().numpy()
+    alpha = (mask * 255).astype(np.uint8)
+    alpha_im = Image.fromarray(alpha).resize(image.size)
+    out = image.convert("RGBA")
+    out.putalpha(alpha_im)
+    return out
+
 
 def _init_hunyuan_pipelines():
     global _shape_pipeline, _paint_pipeline
@@ -51,6 +79,7 @@ def _init_hunyuan_pipelines():
         )
     if _paint_pipeline is None:
         _paint_pipeline = Hunyuan3DPaintPipeline.from_pretrained(HUNYUAN_PAINTDIR)
+
 
 def _init_zoe_depth():
     """Lazy-load ZoeDepth_NK for depth estimation."""
@@ -68,6 +97,7 @@ def _init_zoe_depth():
                 m.drop_path = m.drop_path1
     return _depth_model
 
+
 def detect_objects(image_path: str, scene_folder: str) -> List[str]:
     crop_dir = Path(scene_folder) / "crops"
     crop_dir.mkdir(parents=True, exist_ok=True)
@@ -77,7 +107,7 @@ def detect_objects(image_path: str, scene_folder: str) -> List[str]:
         config_path=DFINE_CONFIG,
         checkpoint_path=DFINE_CHECKPT,
         input_image=image_path,
-        device=DEVICE,
+        device=PIPELINE_DEVICE,
         output_dir=str(crop_dir),
     )
 
@@ -92,13 +122,14 @@ def detect_objects(image_path: str, scene_folder: str) -> List[str]:
         raise RuntimeError(f"No crops found in {crop_dir}")
     return [path for _, path in sorted(crops, key=lambda x: x[0])]
 
+
 def build_mesh(crop_path: str, scene_folder: str) -> str:
     _init_hunyuan_pipelines()
     image = Image.open(crop_path).convert("RGB")
     base  = Path(crop_path).stem
 
-    rembg = BackgroundRemover()
-    image_no_bg = rembg(image)
+    # background removal using BiRefNet
+    image_no_bg = remove_bg_biref(image)
     no_bg_path  = Path(crop_path).with_name(f"{base}_no_bg.png")
     image_no_bg.save(no_bg_path)
 
@@ -121,6 +152,7 @@ def build_mesh(crop_path: str, scene_folder: str) -> str:
     out_path = out_dir / f"{base}_textured.glb"
     painted.export(out_path)
     return str(out_path)
+
 
 def full_reconstruction(image_path: str, scene_folder: str) -> str:
     try:
@@ -146,6 +178,7 @@ def full_reconstruction(image_path: str, scene_folder: str) -> str:
         scene_folder=scene_folder,
         valid_indices=valid_crop_indices
     )
+
 
 def position_meshes(
     mesh_paths: List[str],
@@ -221,6 +254,7 @@ def position_meshes(
     out_path = out_dir / "scene_positioned.glb"
     scene.export(str(out_path))
     return str(out_path)
+
 
 def merge_meshes(mesh_paths: List[str], scene_folder: str) -> str:
     out_dir = Path(scene_folder) / "final"
