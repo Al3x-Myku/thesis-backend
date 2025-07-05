@@ -30,7 +30,7 @@ from .dfine_wrapper import run_dfine_inference
 DFINE_ROOT      = os.getenv("DFINE_ROOT", "./D-FINE")
 DFINE_CONFIG    = os.getenv("DFINE_CONFIG", "configs/dfine/objects365/dfine_hgnetv2_x_obj365.yml")
 DFINE_CHECKPT   = os.getenv("DFINE_CHECKPT", "checkpoints/dfine_x_obj365.pth")
-PIPELINE_DEVICE = os.getenv("PIPELINE_DEVICE", "cuda:0")
+PIPELINE_DEVICE = os.getenv("PIPELINE_DEVICE", "cpu")  # force CPU for BiRefNet
 
 HUNYUAN_SHAPEDIR           = os.getenv("HUNYUAN_SHAPEDIR", "tencent/Hunyuan3D-2mini")
 HUNYUAN_SHAPEDIR_SUBFOLDER = os.getenv("HUNYUAN_SHAPEDIR_SUBFOLDER", "hunyuan3d-dit-v2-mini")
@@ -43,16 +43,16 @@ _paint_pipeline  = None
 _depth_model     = None
 
 # ─── BiRefNet segmentation setup ────────────────────────────────────────────────
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-# Improve CUDA matmul precision
-torch.set_float32_matmul_precision("high")
+# Run BiRefNet entirely on CPU
+device = torch.device("cpu")
 
-# Load BiRefNet once
+# Load BiRefNet once to CPU
 birefnet = AutoModelForImageSegmentation.from_pretrained(
     "ZhengPeng7/BiRefNet", trust_remote_code=True
-).to(DEVICE)
+).to(device)
 
-transform_seg = transforms.Compose([
+# Full-resolution transform
+o_seg = transforms.Compose([
     transforms.Resize((1024, 1024)),
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406],
@@ -61,26 +61,14 @@ transform_seg = transforms.Compose([
 
 
 def remove_bg_biref(image: Image.Image) -> Image.Image:
-    """Run BiRefNet to get a soft mask, threshold, and compose RGBA."""
-    try:
-        inp = transform_seg(image).unsqueeze(0).to(DEVICE)
-        with torch.no_grad():
-            mask_logits = birefnet(inp)[-1]       # (1,1,H,W)
-            mask = mask_logits.sigmoid()[0,0].cpu().numpy()
-    except torch.cuda.OutOfMemoryError:
-        # clear cache and downsample on OOM
-        torch.cuda.empty_cache()
-        small = image.resize((512, 512))
-        inp = transform_seg(small).unsqueeze(0).to(DEVICE)
-        with torch.no_grad():
-            mask_logits = birefnet(inp)[-1]
-            mask_small = mask_logits.sigmoid()[0,0].cpu().numpy()
-        # upsample mask back to original size
-        mask = np.array(
-            Image.fromarray((mask_small * 255).astype(np.uint8))
-            .resize(image.size)
-        ) / 255.0
+    """Run BiRefNet on CPU to get a soft mask and compose RGBA."""
+    # preprocess
+    inp = o_seg(image).unsqueeze(0).to(device)
+    with torch.no_grad():
+        mask_logits = birefnet(inp)[-1]       # (1,1,H,W)
+        mask = mask_logits.sigmoid()[0,0].cpu().numpy()
 
+    # compose RGBA
     alpha = (mask * 255).astype(np.uint8)
     alpha_im = Image.fromarray(alpha).resize(image.size)
     out = image.convert("RGBA")
