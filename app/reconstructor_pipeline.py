@@ -192,12 +192,17 @@ def full_reconstruction(image_path: str, scene_folder: str) -> str:
 from pathlib import Path
 from scipy.ndimage import median_filter
 
-def robust_depth(crop):
+# make sure _init_zoe_depth() is defined elsewhere as before
+
+def robust_depth(crop: np.ndarray) -> float:
     """
-    Compute robust depth estimate by ignoring extreme outliers.
+    Compute a robust depth estimate by discarding the top/bottom 25% of values.
     """
-    valid_depths = crop[(crop > np.percentile(crop, 25)) & (crop < np.percentile(crop, 75))]
-    return np.median(valid_depths) if valid_depths.size > 0 else np.median(crop)
+    if crop.size == 0:
+        return 0.0
+    p25, p75 = np.percentile(crop, [25, 75])
+    trimmed = crop[(crop >= p25) & (crop <= p75)]
+    return float(np.median(trimmed)) if trimmed.size else float(np.median(crop))
 
 def position_meshes(
     mesh_paths: List[str],
@@ -206,11 +211,12 @@ def position_meshes(
     valid_indices: List[int] = None,
     threshold: float = 0.6
 ) -> str:
+    # 1) load & center
     image = Image.open(image_path).convert("RGB")
     W, H = image.size
-    cx, cy = W / 2, H / 2
+    cx, cy = W/2, H/2
 
-    # Run object detection for updated bounding boxes
+    # 2) detect & filter boxes
     processor = AutoImageProcessor.from_pretrained("ustc-community/dfine_x_obj365")
     model_det = DFineForObjectDetection.from_pretrained("ustc-community/dfine_x_obj365")
     inputs = processor(images=image, return_tensors="pt")
@@ -223,59 +229,76 @@ def position_meshes(
     if valid_indices is not None:
         boxes = boxes[valid_indices]
 
-    # ZoeDepth: Estimate and median-filter the depth map for robustness
-    model_zoe = _init_zoe_depth()
-    depth_map = model_zoe.cpu().infer_pil(image)
-    depth_map = median_filter(depth_map, size=5)  # Robust depth map
-    model_zoe.cuda()
+    # 3) depth → median filter
+    zoe = _init_zoe_depth()
+    depth_map = zoe.cpu().infer_pil(image)
+    depth_map = median_filter(depth_map, size=5)
+    zoe.cuda()
 
-    # Sort meshes left→right
+    # 4) sort left→right
     order = np.argsort(boxes[:, 0])
     boxes_sorted = boxes[order]
     meshes_sorted = [mesh_paths[i] for i in order]
 
-    # Improved focal length estimation (median-based)
-    focal_estimations = []
+    # 5) compute per-object focal estimates
+    fis = []
+    fi_details = []
     for mp, bb in zip(meshes_sorted, boxes_sorted):
         x0, y0, x1, y1 = bb.astype(int)
         w_px = x1 - x0
+        crop = depth_map[y0:y1, x0:x1]
+        Z = robust_depth(crop)
+        if w_px <= 0 or Z <= 0:
+            continue
         mesh_ref = trimesh.load(mp, force="scene")
         w_mesh = float(mesh_ref.extents[0])
-        crop_depth = depth_map[y0:y1, x0:x1]
-        if crop_depth.size == 0:
+        if w_mesh <= 0:
             continue
-        Z_ref = robust_depth(crop_depth)
-        focal_estimations.append(w_px * Z_ref / w_mesh)
+        f_i = (w_px * Z) / w_mesh
+        fis.append(f_i)
+        fi_details.append((mp, w_px, Z, w_mesh, f_i))
 
-    if not focal_estimations:
-        raise RuntimeError("No valid focal length estimates.")
-    f = np.median(focal_estimations)
+    if not fis:
+        raise RuntimeError("No valid focal length estimates available")
 
-    # Place each mesh into the scene
+    # 6) reject outliers via IQR
+    fis = np.array(fis)
+    q1, q3 = np.percentile(fis, [25, 75])
+    iqr = q3 - q1
+    mask = (fis >= q1 - 1.5*iqr) & (fis <= q3 + 1.5*iqr)
+    fis_filtered = fis[mask]
+    if fis_filtered.size < fis.size:
+        print(f"⚠️ Rejected {fis.size - fis_filtered.size} outlier f_i estimates")
+    f = float(np.median(fis_filtered))
+
+    # 7) build scene, scaling & translating each mesh
     scene = trimesh.Scene()
-    for i, (mp, bb) in enumerate(zip(meshes_sorted, boxes_sorted)):
+    for mp, bb, f_i in zip(meshes_sorted, boxes_sorted, fis):
         x0, y0, x1, y1 = bb.astype(int)
-        xc, yc = (x0 + x1) / 2, (y0 + y1) / 2
-
-        crop_depth = depth_map[y0:y1, x0:x1]
-        if crop_depth.size == 0:
+        xc, yc = (x0+x1)/2, (y0+y1)/2
+        crop = depth_map[y0:y1, x0:x1]
+        Z = robust_depth(crop)
+        if Z <= 0: 
             continue
 
-        # Robust depth estimation
-        Z = robust_depth(crop_depth)
+        # world coords
         X = (xc - cx) * Z / f
         Y = -(yc - cy) * Z / f
 
         mesh = trimesh.load(mp, force="scene")
-        mesh.apply_translation([X, Y, Z])
-        scene.add_geometry(mesh, node_name=f"obj_{i}")
 
-    # Export the final positioned scene
+        # **scale to correct real-world size**
+        scale_i = (f_i / f)
+        mesh.apply_scale(scale_i)
+
+        mesh.apply_translation([X, Y, Z])
+        scene.add_geometry(mesh, node_name=Path(mp).stem)
+
+    # 8) export
     out_dir = Path(scene_folder) / "final"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "scene_positioned.glb"
     scene.export(str(out_path))
-
     return str(out_path)
 
 # ─── Merge all meshes into one ─────────────────────────────────────────────────
