@@ -262,7 +262,7 @@ def main(args):
             device=device,
             file_path=file_path,
             crop_folder_root=crop_root,
-            thrh=0.7,
+            thrh=0.6,
         )
         print("Image processing complete.")
     else:
