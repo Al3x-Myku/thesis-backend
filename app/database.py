@@ -1,4 +1,3 @@
-# app/database.py
 import os
 from sqlmodel import SQLModel, create_engine, Session
 from dotenv import load_dotenv
@@ -12,9 +11,6 @@ engine = create_engine(
 )
 
 def init_db() -> None:
-    """
-    Create all tables that are defined via SQLModel subclasses.
-    """
     SQLModel.metadata.create_all(engine)
 
 def get_db():

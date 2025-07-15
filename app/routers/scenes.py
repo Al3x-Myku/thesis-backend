@@ -1,9 +1,7 @@
-# app/routers/scenes.py
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, status, Path
 from fastapi.responses import FileResponse
 from typing import List
 import os
-
 from sqlmodel import Session
 from app.database import get_db
 from app.core.config import settings
@@ -29,9 +27,6 @@ async def create_scene(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Create a new Scene for the authenticated user and enqueue reconstruction.
-    """
     scene = create_and_enqueue_scene(db, current_user.id, file)
     return SceneRead.from_orm(scene)
 
@@ -46,9 +41,6 @@ def list_my_scenes(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Returns all scenes (creations) belonging to the logged-in user.
-    """
     scenes = list_scenes_for_user(db, current_user.id)
     return [SceneRead.from_orm(s) for s in scenes]
 
@@ -62,9 +54,6 @@ def get_scene_status(
     scene_id: int = Path(..., description="The ID of the scene to fetch"),
     db: Session = Depends(get_db),
 ):
-    """
-    Fetch the status (and metadata) of a specific Scene.
-    """
     scene = fetch_status(db, scene_id)
     if not scene:
         raise HTTPException(
@@ -84,9 +73,6 @@ def delete_scene(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Delete a scene owned by the authenticated user.
-    """
     scene = fetch_status(db, scene_id)
     if not scene or scene.owner_id != current_user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Scene not found or not owned by you.")
@@ -105,14 +91,10 @@ def download_scene(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Stream the final .glb file for a completed Scene, only if owned by the current user.
-    """
     scene = fetch_status(db, scene_id)
     if not scene or scene.owner_id != current_user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Scene not found or not owned by you.")
 
-    # Build path to the final glb
     data_dir = getattr(settings, "DATA_DIR", os.getenv("DATA_DIR", "./data"))
     base = os.path.join(
         data_dir,
@@ -145,7 +127,6 @@ def download_scene_alias(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # ignore owner_id in the URL and delegate to your existing logic:
     return download_scene(scene_id=scene_id, current_user=current_user, db=db)
 
 
@@ -161,9 +142,6 @@ def get_scene_input(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """
-    Returns the raw 2D image that was uploaded for this scene, provided it belongs to the authenticated user.
-    """
     scene = fetch_status(db, scene_id)
     if not scene or scene.owner_id != current_user.id:
         raise HTTPException(

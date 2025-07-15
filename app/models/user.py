@@ -1,4 +1,3 @@
-# app/models/user.py
 from typing import Optional, List
 from datetime import datetime
 from sqlmodel import SQLModel, Field, Relationship
@@ -23,5 +22,4 @@ class User(UserBase, table=True):
     hashed_password: str = Field(nullable=False)
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
-    # forward-reference as string, no direct import of Scene
     scenes: List["Scene"] = Relationship(back_populates="owner")

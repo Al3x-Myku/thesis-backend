@@ -1,4 +1,3 @@
-# app/core/security.py
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import jwt, JWTError
@@ -10,7 +9,6 @@ from sqlmodel import Session
 from app.core.config import settings
 from app.database import get_db
 
-# --- password hashing ---
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def hash_password(password: str) -> str:
@@ -19,7 +17,6 @@ def hash_password(password: str) -> str:
 def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
 
-# --- JWT settings ---
 SECRET_KEY = settings.SECRET_KEY
 ALGORITHM = settings.ALGORITHM
 ACCESS_TOKEN_EXPIRE_MINUTES = settings.ACCESS_TOKEN_EXPIRE_MINUTES
@@ -43,7 +40,6 @@ def decode_access_token(token: str) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-# --- new current-user dependency ---
 def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),

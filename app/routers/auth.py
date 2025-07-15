@@ -1,4 +1,3 @@
-# app/routers/auth.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import Session
@@ -14,7 +13,6 @@ def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
-    # allow login by username _or_ email
     user = get_user_by_username(db, form_data.username) or get_user_by_email(db, form_data.username)
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(

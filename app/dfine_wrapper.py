@@ -15,7 +15,6 @@ def run_dfine_inference(
     if not torch_inf_py.exists():
         raise FileNotFoundError(f"{torch_inf_py} missing")
 
-    # If config/checkpoint are relative, make them absolute under DFINE_ROOT
     cfg = Path(config_path)
     if not cfg.is_absolute():
         cfg = Path(dfine_root) / config_path

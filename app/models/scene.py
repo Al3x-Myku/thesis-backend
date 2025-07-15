@@ -1,4 +1,3 @@
-# app/models/scene.py
 from typing import Optional
 from datetime import datetime
 from enum import Enum
@@ -23,7 +22,6 @@ class Scene(SceneBase, table=True):
     progress: float = Field(default=0.0, nullable=False)
     result_path: Optional[str] = None
 
-    # forward-reference to User
     owner: Optional["User"] = Relationship(back_populates="scenes")
 
 class SceneRead(SceneBase):

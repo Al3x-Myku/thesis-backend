@@ -2,10 +2,9 @@ from fastapi import APIRouter, Depends, status
 from sqlmodel import Session
 from app.services.user_service import register_user, get_user
 from app.models.user import UserCreate, UserRead
-from app.database import get_db  # see below for this helper
+from app.database import get_db 
 from app.core.security import create_access_token
 from app.schemas.token import Token as SignupToken
-
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -18,12 +17,6 @@ def create_user(
     user_in: UserCreate,
     db: Session = Depends(get_db),
 ):
-    """
-    Register a new user.
-    - Validates username/email uniqueness
-    - Hashes password
-    - Returns the created UserRead schema
-    """
     return register_user(db, user_in)
 
 @router.get(
@@ -35,10 +28,6 @@ def read_user(
     user_id: int,
     db: Session = Depends(get_db),
 ):
-    """
-    Fetch a user by ID.
-    Raises 404 if not found.
-    """
     return get_user(db, user_id)
 
 @router.post(

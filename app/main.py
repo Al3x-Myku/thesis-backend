@@ -12,12 +12,11 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Allow requests coming from your Next.js front-end origin(s)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",          # if you ever browse locally
-        "http://10.220.202.24:3000"       # your EC2‐in‐VPC front-end URL
+        "http://localhost:3000",          
+        "http://10.220.202.24:3000"       
     ],
     allow_credentials=True,
     allow_methods=["*"],

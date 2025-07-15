@@ -4,7 +4,6 @@ import re
 import math
 import torch
 import numpy as np
-
 from pathlib import Path
 from typing import List
 from PIL import Image
@@ -26,37 +25,33 @@ from hy3dgen.shapegen import (
 from hy3dgen.texgen import Hunyuan3DPaintPipeline
 from .dfine_wrapper import run_dfine_inference
 
-# ─── Config from .env ──────────────────────────────────────────────────────────
 DFINE_ROOT      = os.getenv("DFINE_ROOT", "./D-FINE")
 DFINE_CONFIG    = os.getenv("DFINE_CONFIG", "configs/dfine/objects365/dfine_hgnetv2_x_obj365.yml")
 DFINE_CHECKPT   = os.getenv("DFINE_CHECKPT", "checkpoints/dfine_x_obj365.pth")
-PIPELINE_DEVICE = os.getenv("PIPELINE_DEVICE", "cpu")  # Use CPU for BiRefNet segmentation
+PIPELINE_DEVICE = os.getenv("PIPELINE_DEVICE", "cpu")  # use cpu for birefnet
 
 HUNYUAN_SHAPEDIR           = os.getenv("HUNYUAN_SHAPEDIR", "tencent/Hunyuan3D-2mini")
 HUNYUAN_SHAPEDIR_SUBFOLDER = os.getenv("HUNYUAN_SHAPEDIR_SUBFOLDER", "hunyuan3d-dit-v2-mini")
 HUNYUAN_SHAPEDIR_VARIANT   = os.getenv("HUNYUAN_SHAPEDIR_VARIANT", "fp16")
 HUNYUAN_PAINTDIR           = os.getenv("HUNYUAN_PAINTDIR", "tencent/Hunyuan3D-2")
 
-# ─── Lazy singletons ──────────────────────────────────────────────────────────
 _shape_pipeline  = None
 _paint_pipeline  = None
 _depth_model     = None
 
-# ─── BiRefNet segmentation setup ────────────────────────────────────────────────
-# Run BiRefNet on CPU only
+#BiRefNet
 device = torch.device("cpu")
 o_seg = transforms.Compose([
     transforms.Resize((1024, 1024)),
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406],
-                         [0.229, 0.224, 0.225]),
+                        [0.229, 0.224, 0.225]),
 ])
 birefnet = AutoModelForImageSegmentation.from_pretrained(
     "ZhengPeng7/BiRefNet", trust_remote_code=True
 ).to(device)
 
 def remove_bg_biref(image: Image.Image) -> Image.Image:
-    """Run BiRefNet on CPU to get a soft mask and compose RGBA."""
     inp = o_seg(image).unsqueeze(0).to(device)
     with torch.no_grad():
         mask_logits = birefnet(inp)[-1]
@@ -67,7 +62,7 @@ def remove_bg_biref(image: Image.Image) -> Image.Image:
     out.putalpha(alpha_im)
     return out
 
-# ─── Initialize Hunyuan pipelines ──────────────────────────────────────────────
+#Hunyuan 
 def _init_hunyuan_pipelines():
     global _shape_pipeline, _paint_pipeline
     if _shape_pipeline is None:
@@ -82,7 +77,7 @@ def _init_hunyuan_pipelines():
     if _paint_pipeline is None:
         _paint_pipeline = Hunyuan3DPaintPipeline.from_pretrained(HUNYUAN_PAINTDIR)
 
-# ─── Initialize ZoeDepth for depth estimation ─────────────────────────────────
+#ZoeDepth
 def _init_zoe_depth():
     global _depth_model
     if _depth_model is None:
@@ -98,7 +93,7 @@ def _init_zoe_depth():
                 m.drop_path = m.drop_path1
     return _depth_model
 
-# ─── Object detection and cropping via D-FINE ──────────────────────────────────
+#D-FINE
 def detect_objects(image_path: str, scene_folder: str) -> List[str]:
     crop_dir = Path(scene_folder) / "crops"
     crop_dir.mkdir(parents=True, exist_ok=True)
@@ -114,23 +109,21 @@ def detect_objects(image_path: str, scene_folder: str) -> List[str]:
 
     pattern = re.compile(r"crop(\d+)")
     crops = []
-    for ext in ("png", "jpg", "jpeg"):  # gather all crop files
+    for ext in ("png", "jpg", "jpeg"): 
         for p in crop_dir.rglob(f"input_crop*.{ext}"):
             m = pattern.search(p.name)
             if m:
                 crops.append((int(m.group(1)), str(p)))
     if not crops:
         raise RuntimeError(f"No crops found in {crop_dir}")
-    # return sorted by crop index
     return [path for _, path in sorted(crops, key=lambda x: x[0])]
 
-# ─── Build per-object mesh ─────────────────────────────────────────────────────
 def build_mesh(crop_path: str, scene_folder: str) -> str:
     _init_hunyuan_pipelines()
     image = Image.open(crop_path).convert("RGB")
     base  = Path(crop_path).stem
 
-    # background removal
+    # background remove
     image_no_bg = remove_bg_biref(image)
     no_bg_path  = Path(crop_path).with_name(f"{base}_no_bg.png")
     image_no_bg.save(no_bg_path)
@@ -158,7 +151,7 @@ def build_mesh(crop_path: str, scene_folder: str) -> str:
     painted.export(out_path)
     return str(out_path)
 
-# ─── Full scene reconstruction ─────────────────────────────────────────────────
+# orchestrator
 def full_reconstruction(image_path: str, scene_folder: str) -> str:
     try:
         crops = detect_objects(image_path, scene_folder)
@@ -192,12 +185,7 @@ def full_reconstruction(image_path: str, scene_folder: str) -> str:
 from pathlib import Path
 from scipy.ndimage import median_filter
 
-# make sure _init_zoe_depth() is defined elsewhere as before
-
 def robust_depth(crop: np.ndarray) -> float:
-    """
-    Compute a robust depth estimate by discarding the top/bottom 25% of values.
-    """
     if crop.size == 0:
         return 0.0
     p25, p75 = np.percentile(crop, [25, 75])
@@ -229,13 +217,13 @@ def position_meshes(
     if valid_indices is not None:
         boxes = boxes[valid_indices]
 
-    # 3) depth → median filter
+    # 3) depth to median filter
     zoe = _init_zoe_depth()
     depth_map = zoe.cpu().infer_pil(image)
     depth_map = median_filter(depth_map, size=5)
     zoe.cuda()
 
-    # 4) sort left→right
+    # 4) sort left to right
     order = np.argsort(boxes[:, 0])
     boxes_sorted = boxes[order]
     meshes_sorted = [mesh_paths[i] for i in order]
@@ -261,17 +249,17 @@ def position_meshes(
     if not fis:
         raise RuntimeError("No valid focal length estimates available")
 
-    # 6) reject outliers via IQR
+    # 6) reject outliers IQR
     fis = np.array(fis)
     q1, q3 = np.percentile(fis, [25, 75])
     iqr = q3 - q1
     mask = (fis >= q1 - 1.5*iqr) & (fis <= q3 + 1.5*iqr)
     fis_filtered = fis[mask]
     if fis_filtered.size < fis.size:
-        print(f"⚠️ Rejected {fis.size - fis_filtered.size} outlier f_i estimates")
+        print(f"Rejected {fis.size - fis_filtered.size} outlier f_i estimates")
     f = float(np.median(fis_filtered))
 
-    # 7) build scene, scaling & translating each mesh
+    # 7)scene, scaling translating each mesh
     scene = trimesh.Scene()
     for mp, bb, f_i in zip(meshes_sorted, boxes_sorted, fis):
         x0, y0, x1, y1 = bb.astype(int)
@@ -287,7 +275,7 @@ def position_meshes(
 
         mesh = trimesh.load(mp, force="scene")
 
-        # **scale to correct real-world size**
+        # scale to correct real-world size
         scale_i = (f_i / f)
         mesh.apply_scale(scale_i)
 
@@ -301,26 +289,13 @@ def position_meshes(
     scene.export(str(out_path))
     return str(out_path)
 
-# ─── Merge all meshes into one ─────────────────────────────────────────────────
-def merge_meshes(mesh_paths: List[str], scene_folder: str) -> str:
-    out_dir = Path(scene_folder) / "final"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "scene_merged.glb"
-
-    meshes = [trimesh.load(mp, force="scene") for mp in mesh_paths]
-    merged_scene = trimesh.util.concatenate(meshes)
-    merged_scene.export(str(out_path))
-    return str(out_path)
-
 import gc
 import torch
 
 def cleanup_gpu():
-    # Only reset the depth model
     global _depth_model
     if _depth_model is not None:
-        _depth_model.cpu()         # move weights off of CUDA
+        _depth_model.cpu()        
         _depth_model = None
-    # keep _shape_pipeline and _paint_pipeline alive on GPU
     gc.collect()
     torch.cuda.empty_cache()
