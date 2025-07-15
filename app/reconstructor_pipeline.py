@@ -299,3 +299,13 @@ def cleanup_gpu():
         _depth_model = None
     gc.collect()
     torch.cuda.empty_cache()
+
+def merge_meshes(mesh_paths: List[str], scene_folder: str) -> str:
+    out_dir = Path(scene_folder) / "final"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "scene_merged.glb"
+
+    meshes = [trimesh.load(mp, force="scene") for mp in mesh_paths]
+    merged_scene = trimesh.util.concatenate(meshes)
+    merged_scene.export(str(out_path))
+    return str(out_path)
