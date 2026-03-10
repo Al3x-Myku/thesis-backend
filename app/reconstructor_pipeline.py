@@ -39,8 +39,8 @@ _shape_pipeline  = None
 _paint_pipeline  = None
 _depth_model     = None
 
-#BiRefNet
-device = torch.device("cpu")
+# BiRefNet
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 o_seg = transforms.Compose([
     transforms.Resize((1024, 1024)),
     transforms.ToTensor(),
@@ -50,19 +50,26 @@ o_seg = transforms.Compose([
 birefnet = AutoModelForImageSegmentation.from_pretrained(
     "ZhengPeng7/BiRefNet", trust_remote_code=True
 ).to(device)
+birefnet.eval()
 
 def remove_bg_biref(image: Image.Image) -> Image.Image:
     inp = o_seg(image).unsqueeze(0).to(device)
+    
+   
+    model_dtype = next(birefnet.parameters()).dtype
+    inp = inp.to(dtype=model_dtype)
+    
     with torch.no_grad():
         mask_logits = birefnet(inp)[-1]
-        mask = mask_logits.sigmoid()[0, 0].cpu().numpy()
+        # Ne asiguram ca mask devine iar float normal pentru procesare numpy
+        mask = mask_logits.sigmoid()[0, 0].cpu().float().numpy()
+        
     alpha = (mask * 255).astype(np.uint8)
     alpha_im = Image.fromarray(alpha).resize(image.size)
     out = image.convert("RGBA")
     out.putalpha(alpha_im)
     return out
 
-#Hunyuan 
 def _init_hunyuan_pipelines():
     global _shape_pipeline, _paint_pipeline
     if _shape_pipeline is None:
@@ -77,7 +84,6 @@ def _init_hunyuan_pipelines():
     if _paint_pipeline is None:
         _paint_pipeline = Hunyuan3DPaintPipeline.from_pretrained(HUNYUAN_PAINTDIR)
 
-#ZoeDepth
 def _init_zoe_depth():
     global _depth_model
     if _depth_model is None:
@@ -93,7 +99,6 @@ def _init_zoe_depth():
                 m.drop_path = m.drop_path1
     return _depth_model
 
-#D-FINE
 def detect_objects(image_path: str, scene_folder: str) -> List[str]:
     crop_dir = Path(scene_folder) / "crops"
     crop_dir.mkdir(parents=True, exist_ok=True)
@@ -128,7 +133,6 @@ def build_mesh(crop_path: str, scene_folder: str) -> str:
     no_bg_path  = Path(crop_path).with_name(f"{base}_no_bg.png")
     image_no_bg.save(no_bg_path)
 
-    # shape reconstruction
     out_dir = Path(scene_folder) / "meshes" / base
     out_dir.mkdir(parents=True, exist_ok=True)
     mesh = _shape_pipeline(
@@ -141,17 +145,14 @@ def build_mesh(crop_path: str, scene_folder: str) -> str:
     )[0]
     mesh.export(out_dir / f"{base}_raw.glb")
 
-    # mesh cleanup
     for cleaner in (FloaterRemover(), DegenerateFaceRemover(), FaceReducer()):
         mesh = cleaner(mesh)
 
-    # texture painting
     painted = _paint_pipeline(mesh, image=image_no_bg)
     out_path = out_dir / f"{base}_textured.glb"
     painted.export(out_path)
     return str(out_path)
 
-# orchestrator
 def full_reconstruction(image_path: str, scene_folder: str) -> str:
     try:
         crops = detect_objects(image_path, scene_folder)
@@ -204,7 +205,6 @@ def position_meshes(
     W, H = image.size
     cx, cy = W/2, H/2
 
-    # 2) detect & filter boxes
     processor = AutoImageProcessor.from_pretrained("ustc-community/dfine_x_obj365")
     model_det = DFineForObjectDetection.from_pretrained("ustc-community/dfine_x_obj365")
     inputs = processor(images=image, return_tensors="pt")
@@ -217,18 +217,15 @@ def position_meshes(
     if valid_indices is not None:
         boxes = boxes[valid_indices]
 
-    # 3) depth to median filter
     zoe = _init_zoe_depth()
     depth_map = zoe.cpu().infer_pil(image)
     depth_map = median_filter(depth_map, size=5)
     zoe.cuda()
 
-    # 4) sort left to right
     order = np.argsort(boxes[:, 0])
     boxes_sorted = boxes[order]
     meshes_sorted = [mesh_paths[i] for i in order]
 
-    # 5) compute per-object focal estimates
     fis = []
     fi_details = []
     for mp, bb in zip(meshes_sorted, boxes_sorted):
@@ -249,7 +246,6 @@ def position_meshes(
     if not fis:
         raise RuntimeError("No valid focal length estimates available")
 
-    # 6) reject outliers IQR
     fis = np.array(fis)
     q1, q3 = np.percentile(fis, [25, 75])
     iqr = q3 - q1
@@ -259,7 +255,7 @@ def position_meshes(
         print(f"Rejected {fis.size - fis_filtered.size} outlier f_i estimates")
     f = float(np.median(fis_filtered))
 
-    # 7)scene, scaling translating each mesh
+
     scene = trimesh.Scene()
     for mp, bb, f_i in zip(meshes_sorted, boxes_sorted, fis):
         x0, y0, x1, y1 = bb.astype(int)
@@ -275,14 +271,12 @@ def position_meshes(
 
         mesh = trimesh.load(mp, force="scene")
 
-        # scale to correct real-world size
         scale_i = (f_i / f)
         mesh.apply_scale(scale_i)
 
         mesh.apply_translation([X, Y, Z])
         scene.add_geometry(mesh, node_name=Path(mp).stem)
 
-    # 8) export
     out_dir = Path(scene_folder) / "final"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "scene_positioned.glb"

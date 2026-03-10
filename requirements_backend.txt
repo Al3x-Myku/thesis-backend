@@ -5,3 +5,5 @@ pymysql
 sqlmodel
 python-dotenv
 passlib[bcrypt]
+pandas 
+scipy
