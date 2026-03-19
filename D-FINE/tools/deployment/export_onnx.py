@@ -67,7 +67,7 @@ def main(
     }
 
     output_file = args.resume.replace(".pth", ".onnx") if args.resume else "model.onnx"
-
+    print(f"Exporting ONNX to {output_file}...")
     torch.onnx.export(
         model,
         (data, size),
@@ -76,9 +76,10 @@ def main(
         output_names=["labels", "boxes", "scores"],
         dynamic_axes=dynamic_axes,
         opset_version=16,
-        verbose=False,
+        verbose=True,
         do_constant_folding=True,
     )
+    print("Export finished... Check:", args.check)
 
     if args.check:
         import onnx
@@ -122,7 +123,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--simplify",
         action="store_true",
-        default=True,
+        default=False,
     )
     args = parser.parse_args()
     main(args)

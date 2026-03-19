@@ -11,3 +11,10 @@ __pycache__/
 # Uploaded inputs, generated outputs, metadata, etc.
 data/
 
+venv/*
+/venv/
+/data/
+
+venv/bin
+venv/lib*.engine
+*.onnx.data
