@@ -1,27 +1,51 @@
-# Byte‐compiled / optimized / DLL files
+# ── Python ──────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
+*.pyo
+.pytest_cache/
 
-# Virtual environment folder
+# ── Virtual environments ────────────────────────────────────────────────
+venv/
 .venv/
 
-# Environment variables (secrets)
+# ── Environment variables ───────────────────────────────────────────────
 .env
 
-# Uploaded inputs, generated outputs, metadata, etc.
+# ── Data & model weights (too large for git) ────────────────────────────
 data/
-
-venv/*
-/venv/
-/data/
-
-venv/bin
-venv/lib*.engine
+*.engine
 *.onnx.data
-*.png*.png
+
+# ── Generated benchmark outputs ─────────────────────────────────────────
+benchmark_results/scenes/
+benchmark_results/structured3d_examples/
+benchmark_results/thesis_graphs/
+benchmark_results/*.log
+
+# ── Runtime logs & output ───────────────────────────────────────────────
+out.txt
+nohup.out
+wget-log
+*.log
+production_metrics.csv
+real_stress_test_log.csv
+
+# ── Temporary scripts ──────────────────────────────────────────────────
+_tmp_*
+
+# ── Binary / media files ───────────────────────────────────────────────
+*.png
 *.jpg
 *.jpeg
 *.mp4
-*.log
-__pycache__/
+*.glb
+*.gltf
+
+# ── OS files ────────────────────────────────────────────────────────────
 .DS_Store
+
+# ── IDE ─────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
