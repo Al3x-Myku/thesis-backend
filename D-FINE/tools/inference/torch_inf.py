@@ -51,6 +51,10 @@ def save_crops(
             f"Saved crop {crop_idx} "
             f"(label={lbl.item()}, score={scr.item():.2f}) to {out_path}"
         )
+        
+        box_out_path = os.path.join(crop_folder, f"{base_name}_crop{crop_idx}_box.txt")
+        with open(box_out_path, "w") as f:
+            f.write(f"{left},{top},{right},{bottom},{scr.item():.4f},{int(lbl.item())}\n")
 
         crop_idx += 1
 
@@ -111,7 +115,7 @@ def process_image(
     output = model(im_data, orig_size)
     labels, boxes, scores = output
 
-    iou_thresh = 0.5
+    iou_thresh = 0.7
 
     box_list = boxes[0]    
     score_list = scores[0] 
@@ -218,14 +222,14 @@ def main(args):
     file_path = args.input
     ext = os.path.splitext(file_path)[-1].lower()
 
-    if ext in [".jpg", ".jpeg", ".png", ".bmp"]:
+    if ext in [".jpg", ".jpeg", ".png", ".bmp", ".webp"]:
         crop_root = args.output_dir or "./outputs/crops"
         process_image(
             model=model,
             device=device,
             file_path=file_path,
             crop_folder_root=crop_root,
-            thrh=0.6,
+            thrh=0.45,
         )
     else:
         process_video(model, device, file_path)
