@@ -59,6 +59,8 @@ HUNYUAN_SHAPEDIR_SUBFOLDER = os.getenv("HUNYUAN_SHAPEDIR_SUBFOLDER", "hunyuan3d-
 HUNYUAN_SHAPEDIR_VARIANT   = os.getenv("HUNYUAN_SHAPEDIR_VARIANT", "")
 HUNYUAN_PAINTDIR           = os.getenv("HUNYUAN_PAINTDIR", "tencent/Hunyuan3D-2")
 
+MESH_ENGINE = os.getenv("MESH_ENGINE", "hunyuan")  # "hunyuan" | "instantmesh"
+
 _models_cache = {
     "birefnet": None,
     "shape_pipeline": None,
@@ -66,6 +68,8 @@ _models_cache = {
     "depth_model": None,
     "clip": None,
     "restyle": None,
+    "instantmesh": None,  # reserved for InstantMesh ablation arm
+    "mtpano": None,       # reserved for MTPano panoramic depth model
 }
 
 class ThesisProfiler:
@@ -436,7 +440,22 @@ def detect_objects(image_path: str, scene_folder: str, scene_id: str) -> List[Tu
 
     return [(c[1], c[2], c[3], c[4]) for c in crops_data]
 
-def build_mesh(crop_path: str, scene_folder: str, scene_id: str, obj_idx: int = 0, palette=None) -> str:
+def build_mesh(
+    crop_path: str,
+    scene_folder: str,
+    scene_id: str,
+    obj_idx: int = 0,
+    palette=None,
+    engine: str = "",
+) -> str:
+    """Generate a textured 3D mesh from a crop image.
+
+    Args:
+        engine: "hunyuan" (default) or "instantmesh". Empty string uses MESH_ENGINE env var.
+                InstantMesh produces PBR UV maps (Albedo/Normal/AO) and is used as an
+                ablation arm to compare against Hunyuan3D-2's vertex-colour output.
+    """
+    resolved_engine = engine or MESH_ENGINE
 
     base = Path(crop_path).stem
     out_dir = Path(scene_folder) / "meshes" / base
@@ -472,6 +491,18 @@ def build_mesh(crop_path: str, scene_folder: str, scene_id: str, obj_idx: int = 
 
         no_bg_path = Path(crop_path).with_name(f"{base}_no_bg.png")
         image_no_bg.save(no_bg_path)
+
+    # ── InstantMesh ablation arm ──────────────────────────────────────────────
+    if resolved_engine == "instantmesh":
+        from .instantmesh_wrapper import run_instantmesh_inference
+        with ThesisProfiler("3D_InstantMesh", scene_id):
+            mesh_path = run_instantmesh_inference(
+                image_path=str(no_bg_path),
+                out_dir=str(out_dir),
+                obj_id=f"{base}_obj{obj_idx}",
+            )
+        logger.info(f"[{scene_id}] obj{obj_idx}: InstantMesh mesh at {mesh_path}")
+        return mesh_path
 
     with ThesisProfiler("3D_ShapeGen_Hunyuan", scene_id):
         shape_pipe = get_hunyuan_shape()

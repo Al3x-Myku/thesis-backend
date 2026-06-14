@@ -15,6 +15,7 @@ logger = logging.getLogger("ThesisPipeline")
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from virtual_photo import decompose_panorama, WallInfo
+from .panoramic_depth import estimate_panoramic_depth
 
 _pipeline_imported = False
 
@@ -322,22 +323,37 @@ def full_reconstruction_panoramic(
 
         floor_y = min(w.floor_y for w in walls)
 
+        # Depth source priority:
+        #   1. MTPano — equirectangular-aware metric depth (real captures)
+        #   2. GT depth file — only available for Structured3D benchmark scenes
         gt_depth = None
-        pano_depth_path = os.path.join(pano_folder, "full", "depth.png")
-        if os.path.exists(pano_depth_path):
-            try:
-                from PIL import Image
-                depth_img = np.array(Image.open(pano_depth_path))
-                if depth_img.ndim == 3:
-                    depth_img = depth_img[:, :, 0]
-                gt_depth = depth_img.astype(np.float32)
-                if gt_depth.max() > 1000:
-                    gt_depth = gt_depth / 1000.0
-                elif gt_depth.max() > 100:
-                    gt_depth = gt_depth / 100.0
-                logger.info(f"[{scene_id}] Loaded GT depth map: {gt_depth.shape}, range [{gt_depth.min():.2f}, {gt_depth.max():.2f}]m")
-            except Exception as e:
-                logger.warning(f"[{scene_id}] Could not load GT depth: {e}")
+        pano_rgb_candidates = [
+            os.path.join(pano_folder, "full", "rgb.png"),
+            os.path.join(pano_folder, "full", "rgb.jpg"),
+            os.path.join(pano_folder, "rgb.png"),
+            os.path.join(pano_folder, "rgb.jpg"),
+        ]
+        pano_rgb_for_depth = next((p for p in pano_rgb_candidates if os.path.exists(p)), None)
+        if pano_rgb_for_depth:
+            logger.info(f"[{scene_id}] Estimating panoramic depth via MTPano: {pano_rgb_for_depth}")
+            gt_depth = estimate_panoramic_depth(pano_rgb_for_depth)
+
+        if gt_depth is None:
+            pano_depth_path = os.path.join(pano_folder, "full", "depth.png")
+            if os.path.exists(pano_depth_path):
+                try:
+                    from PIL import Image as _PIL
+                    depth_img = np.array(_PIL.open(pano_depth_path))
+                    if depth_img.ndim == 3:
+                        depth_img = depth_img[:, :, 0]
+                    gt_depth = depth_img.astype(np.float32)
+                    if gt_depth.max() > 1000:
+                        gt_depth = gt_depth / 1000.0
+                    elif gt_depth.max() > 100:
+                        gt_depth = gt_depth / 100.0
+                    logger.info(f"[{scene_id}] Loaded GT depth map: {gt_depth.shape}, range [{gt_depth.min():.2f}, {gt_depth.max():.2f}]m")
+                except Exception as e:
+                    logger.warning(f"[{scene_id}] Could not load GT depth: {e}")
 
         placed_count = 0
         for wall in walls:

@@ -54,8 +54,11 @@ app/
   services/                    # orchestration layer
   repositories/                # SQLModel DB access
   models/                      # SQLModel tables (Scene, User, DesignSession, Variant, ElementFeedback, evaluation tables)
+  instantmesh_wrapper.py       # InstantMesh ablation arm (subprocess, like dfine_wrapper.py)
+  panoramic_depth.py           # MTPano / DepthPro depth estimation for equirectangular panoramas
 D-FINE/                        # vendored object detector (Objects365, run as subprocess)
 Hunyuan3D-2/                   # vendored 3D generator
+InstantMesh/                   # ablation arm — clone TencentARC/InstantMesh here
 scripts/                       # evaluation harness (Structured3D / 3D-FRONT benchmarks)
 tests/                         # test suite
 docs/PLAN.md                   # full design methodology and milestone breakdown
@@ -320,6 +323,86 @@ Each CSV maps directly to a DB table with no joins needed. Merge on `evaluator_p
 | `engine_type` (`diffusion` / `baseline`) | variant_2d | Ablation arm label |
 | `presentation_position` (1..N) | variant_2d | Position-bias covariate |
 | `fidelity_2d_to_3d` (1–7) | commit_3d | 2D→3D pipeline fidelity |
+
+---
+
+## InstantMesh ablation arm
+
+InstantMesh (TencentARC/InstantMesh, 2024) is a second 3D generation path that produces **PBR UV texture maps** (Albedo / Normal / AO) instead of Hunyuan3D-2's vertex colours. This matters for the architecture student evaluation — BIM readiness and downstream re-texturability are significantly higher with UV-mapped outputs.
+
+### Setup
+
+```bash
+git clone https://github.com/TencentARC/InstantMesh
+pip install -r InstantMesh/requirements.txt
+# model weights (Zero123++ + LRM) download automatically from HF on first run
+```
+
+### Switching engines
+
+```bash
+# Use InstantMesh for all mesh generation
+MESH_ENGINE=instantmesh uvicorn app.main:app --reload
+
+# Use Hunyuan3D-2 (default)
+MESH_ENGINE=hunyuan uvicorn app.main:app --reload
+```
+
+Or pass `engine="instantmesh"` directly to `build_mesh()` in code to run both engines on the same crop and compare outputs programmatically.
+
+### What each engine produces
+
+| | Hunyuan3D-2 | InstantMesh |
+|---|---|---|
+| Geometry | Watertight mesh (marching cubes) | LRM-reconstructed mesh |
+| Texture | Vertex colours (paint pass) | PBR UV maps (Albedo / Normal / AO) |
+| Palette integration | `apply_palette_projection` on crop before paint | Colour shift via albedo map post-process |
+| BIM readiness | Low (vertex colours) | Higher (UV-mapped, importable to Revit/Blender) |
+| Speed | ~60s | ~30s |
+
+### SOTA context (2026)
+
+- **Mesh-Pro** (CVPR 2026, arXiv:2603.00526, Tencent): asynchronous RL framework for mesh generation (ARPO); 3.75× faster than prior methods. Successor to InstantMesh — worth integrating if Tencent releases weights.
+- **Hunyuan3D-2.1** (2026): adds a "LATTICE" dataset backbone, better surface detail, PBR variant. Direct upgrade path from the current `tencent/Hunyuan3D-2` weights.
+- **FreeMesh** (ICML 2025, arXiv:2505.13573): plug-in coordinate compression for MeshAnything V2 / Edgerunner; improves mesh compactness for assets that need to be lightweight.
+
+---
+
+## Panoramic room-scale reconstruction
+
+The `wall_pipeline.py` path handles 360° equirectangular room panoramas. It decomposes the panorama into per-wall perspective views, runs detection + Hunyuan3D-2 (or InstantMesh) on each detected furniture crop, then assembles a room shell (walls + floor + ceiling) with placed objects.
+
+### Depth estimation upgrade: MTPano
+
+`app/panoramic_depth.py` provides metric depth for room-scale panoramas using **MTPano** (SIGGRAPH 2026, arXiv:2602.05330). MTPano is a multi-task foundation model trained specifically on equirectangular images — it handles the spherical projection distortion that makes standard perspective depth models inaccurate near panorama edges and poles.
+
+Priority chain in `full_reconstruction_panoramic()`:
+
+```
+1. MTPano depth (panoramic-aware, metric)   ← new primary source
+2. GT depth file (pano_folder/full/depth.png)  ← Structured3D benchmark only
+3. No depth (wall distances used for placement) ← existing fallback
+```
+
+```bash
+# Override MTPano model ID (default: Evergreen0929/MTPano)
+MTPANO_MODEL_ID=Evergreen0929/MTPano uvicorn app.main:app --reload
+```
+
+### SOTA context (2026)
+
+- **PanoVGGT** (CVPR 2026, arXiv:2603.17571): takes multiple equirectangular panoramas → globally consistent 3D point cloud + depth + camera poses in a single forward pass. Uses spherical-aware positional encoding + SO(3) augmentation. Best choice if you have ≥2 panoramas of the same room (e.g. before/after shots). GitHub: `YijingGuo-June/PanoVGGT`.
+- **MTPano** (SIGGRAPH 2026, arXiv:2602.05330): single panorama → depth + surface normals + semantics. Label-free training via perspective pseudo-labels. **Current primary** for single-panorama captures.
+- **HY-World 2.0** (arXiv:2604.14268, Tencent): full world generation pipeline — panorama → trajectory → stereo expansion → composed 3D world (mesh + Gaussians). Exports to Unity/Unreal. Relevant if generating novel room views ever becomes a milestone.
+
+### Environment variables summary
+
+```
+MESH_ENGINE=hunyuan|instantmesh     # 3D generation backend (default: hunyuan)
+INSTANTMESH_ROOT=./InstantMesh      # path to cloned TencentARC/InstantMesh
+INSTANTMESH_CONFIG=configs/instant-mesh-large.yaml
+MTPANO_MODEL_ID=Evergreen0929/MTPano
+```
 
 ---
 
