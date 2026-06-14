@@ -1,0 +1,42 @@
+{
+  "wall_idx": 1,
+  "yaw_rad": -2.0493983326152163,
+  "yaw_deg": -117.42187499999999,
+  "angular_width_rad": 0.662679700366597,
+  "angular_width_deg": 37.96875,
+  "fov_deg": 70.0,
+  "normal": [
+    0.88764,
+    0.0,
+    0.460539
+  ],
+  "center_3d": [
+    -0.7305,
+    -2.5284,
+    -0.379
+  ],
+  "left_corner_3d": [
+    -0.5675,
+    -4.6675,
+    -0.5961
+  ],
+  "right_corner_3d": [
+    -0.8141,
+    -4.6675,
+    -0.1208
+  ],
+  "width_m": 0.5355,
+  "height_m": 4.2782,
+  "floor_y": -4.6675,
+  "ceiling_y": -0.3893,
+  "pano_w": 1024,
+  "pano_h": 512,
+  "left_corner_azimuth_rad": -2.380738182798515,
+  "right_corner_azimuth_rad": -1.718058482431918,
+  "rgb_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_01_rgb.jpg",
+  "depth_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_01_depth.png",
+  "semantic_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_01_semantic.png",
+  "meta_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_01_meta.json",
+  "overlaps_left": true,
+  "overlaps_right": true
+}

@@ -1,0 +1,227 @@
+{
+  "pano_folder": "data/Structured3D/Structured3D/scene_01058/2D_rendering/391620/panorama",
+  "pano_w": 1024,
+  "pano_h": 512,
+  "n_corners": 8,
+  "n_walls": 4,
+  "corners": [
+    {
+      "x_pixel": 86.0,
+      "y_ceiling_pixel": 164.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": -2.613903
+    },
+    {
+      "x_pixel": 86.0,
+      "y_ceiling_pixel": 388.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": -2.613903
+    },
+    {
+      "x_pixel": 408.0,
+      "y_ceiling_pixel": 152.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": -0.638136
+    },
+    {
+      "x_pixel": 408.0,
+      "y_ceiling_pixel": 401.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": -0.638136
+    },
+    {
+      "x_pixel": 603.0,
+      "y_ceiling_pixel": 148.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": 0.558369
+    },
+    {
+      "x_pixel": 603.0,
+      "y_ceiling_pixel": 405.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": 0.558369
+    },
+    {
+      "x_pixel": 948.0,
+      "y_ceiling_pixel": 161.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": 2.675262
+    },
+    {
+      "x_pixel": 948.0,
+      "y_ceiling_pixel": 391.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": 2.675262
+    }
+  ],
+  "walls": [
+    {
+      "wall_idx": 0,
+      "yaw_rad": -1.6260196351587797,
+      "yaw_deg": -93.1640625,
+      "angular_width_rad": 1.9757672547967058,
+      "angular_width_deg": 113.203125,
+      "fov_deg": 110.0,
+      "normal": [
+        0.998476,
+        0.0,
+        0.055195
+      ],
+      "center_3d": [
+        -0.9715,
+        -2.801,
+        -0.0537
+      ],
+      "left_corner_3d": [
+        -0.4899,
+        -5.5182,
+        -0.8406
+      ],
+      "right_corner_3d": [
+        -0.5796,
+        -5.5182,
+        0.7815
+      ],
+      "width_m": 1.6246,
+      "height_m": 5.4344,
+      "floor_y": -5.5182,
+      "ceiling_y": -0.0838,
+      "pano_w": 1024,
+      "pano_h": 512,
+      "left_corner_azimuth_rad": -2.6139032625571326,
+      "right_corner_azimuth_rad": -0.6381360077604268,
+      "rgb_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_00_rgb.jpg",
+      "depth_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_00_depth.png",
+      "semantic_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_00_semantic.png",
+      "meta_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_00_meta.json",
+      "overlaps_left": true,
+      "overlaps_right": true
+    },
+    {
+      "wall_idx": 1,
+      "yaw_rad": -0.039883500485026424,
+      "yaw_deg": -2.285156249999986,
+      "angular_width_rad": 1.1965050145508003,
+      "angular_width_deg": 68.55468750000001,
+      "fov_deg": 88.55468750000001,
+      "normal": [
+        0.039873,
+        0.0,
+        -0.999205
+      ],
+      "center_3d": [
+        -0.0532,
+        -3.8559,
+        1.3319
+      ],
+      "left_corner_3d": [
+        -0.7941,
+        -7.5598,
+        1.0707
+      ],
+      "right_corner_3d": [
+        0.7062,
+        -7.5598,
+        1.1305
+      ],
+      "width_m": 1.5015,
+      "height_m": 7.4079,
+      "floor_y": -7.5598,
+      "ceiling_y": -0.152,
+      "pano_w": 1024,
+      "pano_h": 512,
+      "left_corner_azimuth_rad": -0.6381360077604268,
+      "right_corner_azimuth_rad": 0.5583690067903734,
+      "rgb_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_01_rgb.jpg",
+      "depth_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_01_depth.png",
+      "semantic_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_01_semantic.png",
+      "meta_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_01_meta.json",
+      "overlaps_left": true,
+      "overlaps_right": true
+    },
+    {
+      "wall_idx": 2,
+      "yaw_rad": 1.6168157504314653,
+      "yaw_deg": 92.63671874999997,
+      "angular_width_rad": 2.1168934872821845,
+      "angular_width_deg": 121.28906249999999,
+      "fov_deg": 110.0,
+      "normal": [
+        -0.998941,
+        0.0,
+        0.046003
+      ],
+      "center_3d": [
+        0.906,
+        -2.6478,
+        -0.0417
+      ],
+      "left_corner_3d": [
+        0.4805,
+        -5.1439,
+        0.7692
+      ],
+      "right_corner_3d": [
+        0.4078,
+        -5.1439,
+        -0.8102
+      ],
+      "width_m": 1.5811,
+      "height_m": 4.9922,
+      "floor_y": -5.1439,
+      "ceiling_y": -0.1517,
+      "pano_w": 1024,
+      "pano_h": 512,
+      "left_corner_azimuth_rad": 0.5583690067903734,
+      "right_corner_azimuth_rad": 2.675262494072558,
+      "rgb_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_02_rgb.jpg",
+      "depth_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_02_depth.png",
+      "semantic_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_02_semantic.png",
+      "meta_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_02_meta.json",
+      "overlaps_left": true,
+      "overlaps_right": true
+    },
+    {
+      "wall_idx": 3,
+      "yaw_rad": -3.1109130378320806,
+      "yaw_deg": -178.24218750000003,
+      "angular_width_rad": 0.9940195505498952,
+      "angular_width_deg": 56.953124999999986,
+      "fov_deg": 76.95312499999999,
+      "normal": [
+        0.030675,
+        0.0,
+        0.999529
+      ],
+      "center_3d": [
+        -0.0174,
+        -1.6483,
+        -0.5677
+      ],
+      "left_corner_3d": [
+        0.2554,
+        -3.2213,
+        -0.5074
+      ],
+      "right_corner_3d": [
+        -0.286,
+        -3.2213,
+        -0.4907
+      ],
+      "width_m": 0.5416,
+      "height_m": 3.1459,
+      "floor_y": -3.2213,
+      "ceiling_y": -0.0754,
+      "pano_w": 1024,
+      "pano_h": 512,
+      "left_corner_azimuth_rad": 2.675262494072558,
+      "right_corner_azimuth_rad": -2.6139032625571326,
+      "rgb_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_03_rgb.jpg",
+      "depth_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_03_depth.png",
+      "semantic_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_03_semantic.png",
+      "meta_path": "benchmark_results/full_3/scenes/scene_01058_391620_pano/wall_views/wall_03_meta.json",
+      "overlaps_left": true,
+      "overlaps_right": true
+    }
+  ]
+}

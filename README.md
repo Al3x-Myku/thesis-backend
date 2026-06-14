@@ -1,106 +1,108 @@
 # thesis-backend
 
-Single-photo → textured 3D scene reconstruction, extended with a generative **Interior Design Zone**: upload a room photo and a mood board, get editable 2D room iterations with palette and furniture disentangled, commit a chosen variant to a 3D `.glb`.
+Deci, basicamente ce face asta: dai o poza cu o camera + un mood board si sistemul iti genereaza variante 2D ale camerei cu paleta de culori si stilul mobilierului schimbate separat, dupa care poti sa "commitui" varianta preferata la un model 3D .glb. E proiectul de teza, nu judecati codul prea tare.
 
 ---
 
-## Architecture overview
+## Cum functioneaza (pe scurt)
 
 ```
-HTTP upload → app/routers/scenes.py → app/services/scene_service.py
-   → writes data/user_<uid>/scene_<id>/input.png, creates Scene row (PENDING)
-   → celery_app.send_task("app.tasks.reconstruct_scene", scene_id)
+Poza camera → scenes router → scene_service → salveaza input.png → task Celery
 
-Celery worker → app/tasks.py → app/reconstructor_pipeline.py:full_reconstruction()
-   1. detect_objects()  → D-FINE (subprocess, HF fallback) → crops + box files
-   2. build_mesh()      → BiRefNet bg removal → Hunyuan3D shape → Hunyuan3D texture
-   3. position_meshes() → DepthPro depth + scene_geometry.py → final .glb
+Celery worker → reconstructor_pipeline.py:full_reconstruction()
+   1. detect_objects()  → D-FINE (sau fallback HuggingFace) → crops + coordonate
+   2. build_mesh()      → BiRefNet scoate background → Hunyuan3D-2 face shape → Hunyuan3D-2 face textura
+   3. position_meshes() → DepthPro estimeaza adancime → asambleaza scena → .glb final
 ```
 
-### Interior Design Zone (design-zone branch)
+### Design Zone (ramura design-zone)
 
 ```
-POST /scenes/{id}/design/moodboard → analyze_moodboard task
-   app/moodboard.py: extract_palette (CIELAB KMeans) + extract_furniture_style (D-FINE + CLIP)
+POST /scenes/{id}/design/moodboard → task analyze_moodboard
+   moodboard.py: extrage paleta CIELAB (KMeans) + stilul mobilierului (D-FINE + CLIP)
    → DesignSpec{ Palette, FurnitureSpec }
 
-POST .../variants → generate_2d_variants task
-   app/restyle_2d.py: structure conditioning (depth + Canny + boxes)
-   + SD1.5 + ControlNet(depth) + IP-Adapter (palette swatch image)
-   + apply_palette_projection (LAB Reinhard transport)
-   → N variant PNGs
+POST .../variants?n=4&mode=full → task generate_2d_variants
+   restyle_2d.py: conditionare structura (depth + Canny + bounding boxes)
+   + SD1.5 + ControlNet(depth) + IP-Adapter (imagine cu swatchuri de culori)
+   + apply_palette_projection (transport Reinhard in spatiu LAB)
+   → N variante PNG
 
-POST .../variants/{vid}/feedback   → mark elements liked/disliked (locked dict in DB)
-POST .../variants/{vid}/regenerate → regenerate with locked slots composited verbatim (M4)
-POST .../variants/{vid}/commit     → commit_3d task → commit_reconstruction() → .glb (M5)
+mode=full          → IP-Adapter primeste paleta + cropuri mobilier din moodboard (style bleed)
+mode=palette_only  → IP-Adapter primeste doar paleta → mobilierul din camera original ramas intact
+
+POST .../variants/{vid}/feedback   → marcheaza elemente liked/disliked (dict blocat in DB)
+POST .../variants/{vid}/regenerate → regenereaza pastrnd sloturile blocate pixel-exact (M4)
+POST .../variants/{vid}/commit     → task commit_3d → commit_reconstruction() → .glb (M5)
 ```
 
-**Disentanglement**: CIELAB palette = appearance knob (IP-Adapter + `apply_palette_projection`). Furniture placement = structure knob (ControlNet conditioning). They are injected independently and can be edited independently. On 3D commit, palette re-textures the Hunyuan3D paint pass without regenerating geometry.
+**Disentanglement**: paleta CIELAB = canalul de aparenta (IP-Adapter + `apply_palette_projection`). Mobilierul = canalul de structura (conditionare ControlNet). Sunt injectate independent si pot fi editate independent. La commit 3D, paleta re-textureza pass-ul de paint Hunyuan3D-2 fara sa regenereze geometria.
 
 ---
 
-## Repository layout
+## Structura repo
 
 ```
 app/
-  reconstructor_pipeline.py   # full GPU pipeline + detect_objects + build_mesh + position_meshes
-  dfine_wrapper.py             # D-FINE subprocess wrapper (HF Transformers fallback built in)
-  moodboard.py                 # DesignSpec dataclasses, extract_palette, extract_furniture_style
+  reconstructor_pipeline.py   # pipeline GPU complet; dict _models_cache; env var MESH_ENGINE
+  dfine_wrapper.py             # wrapper subprocess D-FINE (fallback HF Transformers inclus)
+  instantmesh_wrapper.py       # brat ablatie InstantMesh (subprocess, ca dfine_wrapper)
+  panoramic_depth.py           # MTPano / DepthPro pentru adancime panorame 360
+  moodboard.py                 # dataclass-uri DesignSpec, extract_palette, extract_furniture_style
   restyle_2d.py                # apply_palette_projection, build_structure_conditioning, generate_variants
-  scene_geometry.py            # geometry primitives (intrinsics, floor RANSAC, metric scaling)
-  wall_pipeline.py             # 360° panorama decomposition path
-  tasks.py                     # Celery task definitions
-  routers/                     # FastAPI routers: scenes, auth, users, debug, design, evaluation
-  services/                    # orchestration layer
-  repositories/                # SQLModel DB access
-  models/                      # SQLModel tables (Scene, User, DesignSession, Variant, ElementFeedback, evaluation tables)
-  instantmesh_wrapper.py       # InstantMesh ablation arm (subprocess, like dfine_wrapper.py)
-  panoramic_depth.py           # MTPano / DepthPro depth estimation for equirectangular panoramas
-D-FINE/                        # vendored object detector (Objects365, run as subprocess)
-Hunyuan3D-2/                   # vendored 3D generator
-InstantMesh/                   # ablation arm — clone TencentARC/InstantMesh here
-scripts/                       # evaluation harness (Structured3D / 3D-FRONT benchmarks)
-tests/                         # test suite
-docs/PLAN.md                   # full design methodology and milestone breakdown
+  scene_geometry.py            # primitive geometrie (intrinsics, RANSAC podea, scalare metrica)
+  wall_pipeline.py             # path pentru panorame 360, full_reconstruction_panoramic()
+  tasks.py                     # definitii taskuri Celery
+  routers/                     # routere FastAPI: scenes, auth, users, debug, design, evaluation
+  services/                    # layer de orchestrare
+  repositories/                # acces DB cu SQLModel
+  models/                      # tabele SQLModel (Scene, User, DesignSession, Variant, etc.)
+D-FINE/                        # detector obiecte vendored (Objects365, rulat ca subprocess)
+Hunyuan3D-2/                   # generator 3D vendored
+InstantMesh/                   # brat ablatie — cloneaza TencentARC/InstantMesh aici
+scripts/                       # harness evaluare benchmark + script batch pipeline
+tests/                         # suite de teste
+docs/PLAN.md                   # metodologie si breakdown milestone-uri
 ```
 
 ---
 
-## Environment setup
+## Setup mediu
 
-Tested on RTX 5080 16 GB, CUDA 12.8, Ubuntu 24.04.
+Testat pe RTX 5080 16 GB, CUDA 12.8, Ubuntu 24.04. Pe alte configuratii nu garantez nimic.
 
 ```bash
-# Create conda environment with full ML stack
+# Creeaza mediu conda cu stiva ML completa
 conda create -n ml python=3.12
 conda activate ml
 
 # PyTorch (CUDA 12.8 / Blackwell)
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
 
-# Backend dependencies
+# Dependente backend
 pip install -r requirements_backend.txt
 
-# Full ML stack
+# Stiva ML completa
 pip install -r requirements_all.txt
 
-# Additional runtime deps
+# Dependente runtime suplimentare
 pip install trimesh==4.6.12 calflops
 
-# Hunyuan3D custom CUDA ops (compiles rasterizer + renderer)
+# Hunyuan3D ops CUDA custom (compileaza rasterizer + renderer)
 pip install -e Hunyuan3D-2
 
-# D-FINE (editable, for the import path)
-# Note: the subprocess uses PYTHONPATH=D-FINE/ automatically; no pip install needed
+# InstantMesh (brat ablatie, optional)
+git clone https://github.com/TencentARC/InstantMesh
+pip install -r InstantMesh/requirements.txt
 ```
 
-### Environment variables (`.env`)
+### Variabile de mediu (`.env`)
 
 ```
-SECRET_KEY=<random-string>
+SECRET_KEY=<string-random>
 DATABASE_URL=mysql+pymysql://user:pass@host/dbname
 
-# Optional — defaults shown
+# Optionale — valorile default sunt astea
 DATA_DIR=./data
 PIPELINE_DEVICE=cuda:0
 DFINE_ROOT=./D-FINE
@@ -108,73 +110,99 @@ DFINE_CONFIG=configs/dfine/objects365/dfine_hgnetv2_x_obj365.yml
 DFINE_CHECKPT=weights/dfine_x_obj365.pth
 HUNYUAN_SHAPEDIR=tencent/Hunyuan3D-2
 HUNYUAN_PAINTDIR=tencent/Hunyuan3D-2
+
+# Ablatie si panorame
+MESH_ENGINE=hunyuan                    # sau instantmesh
+INSTANTMESH_ROOT=./InstantMesh
+MTPANO_MODEL_ID=Evergreen0929/MTPano
 ```
 
-**D-FINE weights**: download `dfine_x_obj365.pth` from the [D-FINE releases](https://github.com/Peterande/D-FINE/releases) and place at `D-FINE/weights/dfine_x_obj365.pth`. If the file is absent or the subprocess fails for any reason, `detect_objects` automatically falls back to `ustc-community/dfine_x_obj365` via HuggingFace Transformers — no manual action required.
+**Greutati D-FINE**: descarca `dfine_x_obj365.pth` din [D-FINE releases](https://github.com/Peterande/D-FINE/releases) si pune-l la `D-FINE/weights/dfine_x_obj365.pth`. Daca lipseste sau subprocesul pica, `detect_objects` foloseste automat fallback-ul `ustc-community/dfine_x_obj365` via HuggingFace Transformers.
 
 ---
 
-## Running the server
+## Rulare server
 
 ```bash
 # API (dev, auto-reload)
 uvicorn app.main:app --reload
 
-# Celery worker (required for any reconstruction or design task)
+# Worker Celery (necesar pentru orice task de reconstructie sau design)
 celery -A app.celery_app.celery_app worker --loglevel=info
 ```
 
-The broker and result backend are both `DATABASE_URL` (SQLAlchemy). No Redis or RabbitMQ needed.
+Broker si result backend sunt ambele `DATABASE_URL` (SQLAlchemy). Nu trebuie Redis sau RabbitMQ.
 
 ---
 
-## Running tests
-
-The test suite is split into two tiers:
-
-### CPU-only tests (no GPU required)
-
-These cover pure-logic modules and run on any machine with numpy/Pillow/scikit-learn:
+## Rulare batch (mai multe perechi poza+moodboard)
 
 ```bash
-# Scene geometry primitives
-pytest tests/test_scene_geometry.py -v
-
-# Moodboard palette extraction (CIELAB clustering, DesignSpec serialization)
-pytest tests/test_moodboard.py -v
-
-# 2D restyle engine: palette projection, variant planning, locked-slot compositing
-pytest tests/test_restyle_2d.py -v
-
-# All CPU tests at once
-pytest tests/test_scene_geometry.py tests/test_moodboard.py tests/test_restyle_2d.py -v
+python scripts/batch_run.py \
+  --pairs-dir pairs/ \
+  --api http://localhost:8000 \
+  --email email@tau.com \
+  --password parola \
+  --variants 4 \
+  --mode full \
+  --commit-variant 0
 ```
 
-These need only:
+Structura folder perechi:
+```
+pairs/
+  001/
+    room.jpg         ← poza camerei
+    moodboard/
+      board_1.jpg    ← una sau mai multe imagini moodboard
+      board_2.jpg
+  002/
+    room.jpg
+    moodboard/
+      board_1.jpg
+```
+
+Flaguri utile:
+- `--mode palette_only` — doar paleta de culori, fara stilul mobilierului din moodboard
+- `--commit-variant -1` — sari peste commit 3D (mult mai rapid)
+- `--engine instantmesh` — foloseste InstantMesh in loc de Hunyuan3D-2 pentru 3D
+- `--dry-run` — vezi ce s-ar procesa fara sa faci apeluri API
+
+Scriptul e **resumabil** — salveaza `out/meta.json` dupa fiecare pas. Daca il opresti la jumatate, la urmatoarea rulare sare peste pasii deja facuti.
+
+---
+
+## Rulare teste
+
+### Teste CPU (fara GPU)
+
+Acopera logica pura, ruleaza pe orice masina cu numpy/Pillow/scikit-learn:
+
 ```bash
+pytest tests/test_scene_geometry.py tests/test_moodboard.py tests/test_restyle_2d.py -v
+
+# Necesita doar:
 pip install numpy pillow scikit-learn scipy trimesh pytest
 ```
 
-### GPU tests (requires the full ML environment)
+### Teste GPU (necesita mediu ML complet)
 
-These validate the live pipeline paths — CLIP embeddings, diffusion restyle (SD1.5 + ControlNet + IP-Adapter), D-FINE detection, depth estimation, and the M4/M5 design zone flows:
+Valideaza pipeline-urile live — embeddings CLIP, restyle difuziv (SD1.5 + ControlNet + IP-Adapter), detectie D-FINE, estimare adancime:
 
 ```bash
 conda activate ml
 pytest tests/test_design_gpu.py -v
 ```
 
-What each test class covers:
-
-| Class | Tests | What runs on GPU |
+| Clasa | Teste | Ce ruleaza pe GPU |
 |---|---|---|
-| `TestM2MoodboardAnalysis` | 4 | `extract_palette`, `extract_furniture_style` (D-FINE + CLIP), `analyze_moodboard` roundtrip |
-| `TestM3RestyLe2D` | 3 | `build_structure_conditioning` (depth + detection), `generate_variants` (diffusion), palette color-shift assertion |
-| `TestM4FeedbackFreeze` | 2 | Locked-slot pixel identity, unlocked variant divergence |
-| `TestM5PaletteUtils` | 5 | `palette_to_shell_colors`, `position_meshes(shell_colors=, out_subdir=)`, backward compat |
-| `TestDesignFlowIntegration` | 1 | Full moodboard → spec → 3 variants end-to-end |
+| `TestM2MoodboardAnalysis` | 4 | `extract_palette`, `extract_furniture_style` (D-FINE + CLIP), roundtrip `analyze_moodboard` |
+| `TestM3RestyLe2D` | 3 | `build_structure_conditioning` (depth + detectie), `generate_variants` (difuzie), assert schimbare culoare |
+| `TestM4FeedbackFreeze` | 2 | Identitate pixeli slot blocat, divergenta varianta deblocata |
+| `TestM5PaletteUtils` | 5 | `palette_to_shell_colors`, `position_meshes(shell_colors=, out_subdir=)`, compat backwards |
+| `TestDesignFlowIntegration` | 1 | Flux complet moodboard → spec → 3 variante end-to-end |
 
-Run the full suite (CPU + GPU):
+Suite completa (CPU + GPU):
 
 ```bash
 conda activate ml
@@ -182,234 +210,131 @@ pytest tests/ -q
 # Expected: 43 passed
 ```
 
-### Quick end-to-end diffusion example
-
-Generate 4 room variants from a moodboard palette without the web server:
-
-```python
-import sys, os, numpy as np
-sys.path.insert(0, '/path/to/thesis-backend')
-os.chdir('/path/to/thesis-backend')
-
-from app.moodboard import analyze_moodboard
-from app.restyle_2d import generate_variants
-from PIL import Image
-
-# Point at a real moodboard image (e.g. a Pinterest screenshot)
-spec = analyze_moodboard(
-    ['path/to/moodboard.jpg'],
-    work_dir='/tmp/example/moodboard',
-    scene_id='example',
-    k=6,
-)
-print(f'Palette: {len(spec.palette.swatches)} swatches, Furniture: {len(spec.furniture.items)} items')
-
-paths = generate_variants(
-    room_photo_path='path/to/room.jpg',
-    scene_folder='/tmp/example',
-    scene_id='example',
-    spec=spec,
-    n=4,
-)
-for p in paths:
-    print(p, Image.open(p).size)
-```
-
 ---
 
-## Human validation system
+## Brat ablatie InstantMesh
 
-Structured research instrument for collecting architecture student evaluations of generated rooms. Designed for parallel use with Google Forms / Qualtrics — participants view images on the hosted viewer page while answering questions in an external form.
+InstantMesh (TencentARC/InstantMesh, 2024) e un al doilea path de generare 3D care produce **harti de textura PBR UV** (Albedo / Normal / AO) in loc de culorile pe vertex de la Hunyuan3D-2. Conteaza pentru evaluarea studentilor de arhitectura — BIM readiness si re-texturabilitate downstream sunt mult mai mari cu output UV-mapped.
 
-### Access model
-
-```
-Researcher (JWT) → POST /evaluation/sessions
-                 ← { token, participant_url_hint: "/evaluation/{token}/view" }
-
-Share URL with participants (no account needed)
-   GET /evaluation/{token}/view   → HTML page with all variant images + 3D viewer
-
-Participants submit via the external form tool (Google Forms / Qualtrics).
-Results can optionally also be submitted directly via the token-based API.
-
-Researcher exports:
-   GET /evaluation/export/profiles.csv       → demographics
-   GET /evaluation/export/variants_2d.csv    → per-variant ratings
-   GET /evaluation/export/variant_sets.csv   → cross-variant comparison
-   GET /evaluation/export/commit_3d.csv      → 3D model ratings
-   GET /evaluation/export/all.csv            → all four tables concatenated
-```
-
-### The four evaluation forms
-
-#### Form 1 — Evaluator profile (demographics, filled once)
-
-Captured fields: age range, gender (optional), professional role, years of experience, education level, specialization, country of education, software stack (free list), and three 1–5 Likert familiarity scales (AI tools, 3D modeling, interior design software).
-
-#### Form 2 — Per-variant 2D evaluation (filled once per variant)
-
-18 Likert 1–7 items organized into four channels that map directly to the two disentanglement axes:
-
-| Channel | Items |
-|---|---|
-| Appearance / palette | Aesthetic quality, color harmony, palette fidelity to moodboard, atmosphere/mood, color temperature appropriateness |
-| Structure / furniture | Spatial layout preservation, furniture style consistency, furniture placement plausibility, scale and proportion accuracy |
-| Realism | Photorealism, lighting plausibility, material surface quality, shadow and reflection quality |
-| Professional | Professional suitability, client presentability, innovation and creativity, design coherence |
-
-Plus categorical items (would you present to a client? estimated manual redesign time) and four open-text fields: most appealing aspect, most problematic aspect, design suggestions, elements that reveal AI generation.
-
-#### Form 3 — Variant set comparison (filled once after seeing all variants)
-
-Core research probe for the disentanglement claim:
-
-- **Ranking**: ordered preference list of variant IDs
-- **Disentanglement perception**: `palette_change_perceived`, `furniture_change_perceived`, `perceived_what_changed` (per-channel dict), `disentanglement_clarity` (1–7), `palette_axis_control_confidence` (1–7), `furniture_axis_control_confidence` (1–7)
-- **Leakage probe**: `cross_channel_leakage_observed` (bool) + open description — measures whether a change intended for one axis unintentionally altered the other
-- **AI tool assessment**: utility, trustworthiness, workflow integration ease, time saved vs manual, professional adoption intent, whether the tool replaces or augments existing steps
-- Open text: biggest limitation, most valuable feature, suggested improvements, comparison to existing tools (Lumion, Enscape, Midjourney, etc.)
-
-#### Form 4 — 3D commit evaluation (filled after the 3D viewer)
-
-18 items across four groups: geometry accuracy (mesh completeness, spatial accuracy, furniture geometry, artifact presence), appearance (texture quality, material representation, palette fidelity, surface detail), 2D→3D fidelity (four items testing how faithfully the committed 3D matches the chosen variant and the original room), and professional applicability (usability for further modeling, BIM readiness, presentation quality, overall rating).
-
-Categorical: would you use this 3D output? preferred export format, cleanup effort required (none / minor / moderate / major / complete redo).
-
-### Running the study
-
-**Step 1 — Generate variants and commit to 3D** using the design zone endpoints (`POST /scenes/{id}/design/moodboard`, `→ /variants`, `→ /variants/{vid}/commit`).
-
-**Step 2 — Create a study session** (requires researcher account):
+### Comutare intre motoare
 
 ```bash
-curl -X POST /evaluation/sessions \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "scene_id": 1,
-    "design_session_id": 1,
-    "generation_engine_disclosed": false,
-    "notes": "Cohort A — MSc Architecture Year 2"
-  }'
-# Response includes "token" and "participant_url_hint"
-```
-
-**Step 3 — Share the viewer URL** in the Google Forms invitation email:
-```
-Please open this link before starting the form: https://your-server/evaluation/{token}/view
-Keep it open alongside the form — you will need to refer to the images while answering.
-```
-
-**Step 4 — Export results** after the study closes:
-
-```bash
-curl -H "Authorization: Bearer <token>" /evaluation/export/variants_2d.csv > variants.csv
-curl -H "Authorization: Bearer <token>" /evaluation/export/variant_sets.csv > sets.csv
-curl -H "Authorization: Bearer <token>" /evaluation/export/profiles.csv > demographics.csv
-```
-
-Each CSV maps directly to a DB table with no joins needed. Merge on `evaluator_profile_id` to combine demographics with ratings. `study_session_id` links all tables for multi-cohort filtering.
-
-### Key variables for statistical analysis
-
-| Variable | Table | Use |
-|---|---|---|
-| `palette_fidelity_to_moodboard` (1–7) | variant_2d | Palette channel fidelity |
-| `spatial_layout_preservation` (1–7) | variant_2d | Structure channel fidelity |
-| `disentanglement_clarity` (1–7) | variant_sets | Perceived independence of axes |
-| `cross_channel_leakage_observed` (bool) | variant_sets | Measured leakage |
-| `palette_change_perceived` / `furniture_change_perceived` | variant_sets | Perception probe |
-| `engine_type` (`diffusion` / `baseline`) | variant_2d | Ablation arm label |
-| `presentation_position` (1..N) | variant_2d | Position-bias covariate |
-| `fidelity_2d_to_3d` (1–7) | commit_3d | 2D→3D pipeline fidelity |
-
----
-
-## InstantMesh ablation arm
-
-InstantMesh (TencentARC/InstantMesh, 2024) is a second 3D generation path that produces **PBR UV texture maps** (Albedo / Normal / AO) instead of Hunyuan3D-2's vertex colours. This matters for the architecture student evaluation — BIM readiness and downstream re-texturability are significantly higher with UV-mapped outputs.
-
-### Setup
-
-```bash
-git clone https://github.com/TencentARC/InstantMesh
-pip install -r InstantMesh/requirements.txt
-# model weights (Zero123++ + LRM) download automatically from HF on first run
-```
-
-### Switching engines
-
-```bash
-# Use InstantMesh for all mesh generation
+# Foloseste InstantMesh pentru toata generarea de mesh-uri
 MESH_ENGINE=instantmesh uvicorn app.main:app --reload
 
-# Use Hunyuan3D-2 (default)
+# Foloseste Hunyuan3D-2 (default)
 MESH_ENGINE=hunyuan uvicorn app.main:app --reload
 ```
 
-Or pass `engine="instantmesh"` directly to `build_mesh()` in code to run both engines on the same crop and compare outputs programmatically.
-
-### What each engine produces
-
 | | Hunyuan3D-2 | InstantMesh |
 |---|---|---|
-| Geometry | Watertight mesh (marching cubes) | LRM-reconstructed mesh |
-| Texture | Vertex colours (paint pass) | PBR UV maps (Albedo / Normal / AO) |
-| Palette integration | `apply_palette_projection` on crop before paint | Colour shift via albedo map post-process |
-| BIM readiness | Low (vertex colours) | Higher (UV-mapped, importable to Revit/Blender) |
-| Speed | ~60s | ~30s |
+| Geometrie | Mesh watertight (marching cubes) | Mesh reconstruit LRM |
+| Textura | Culori pe vertex (paint pass) | Harti PBR UV (Albedo / Normal / AO) |
+| BIM readiness | Scazut | Mai ridicat (UV-mapped, importabil in Revit/Blender) |
+| Viteza | ~60s | ~30s |
 
-### SOTA context (2026)
+### Context SOTA 2026
 
-- **Mesh-Pro** (CVPR 2026, arXiv:2603.00526, Tencent): asynchronous RL framework for mesh generation (ARPO); 3.75× faster than prior methods. Successor to InstantMesh — worth integrating if Tencent releases weights.
-- **Hunyuan3D-2.1** (2026): adds a "LATTICE" dataset backbone, better surface detail, PBR variant. Direct upgrade path from the current `tencent/Hunyuan3D-2` weights.
-- **FreeMesh** (ICML 2025, arXiv:2505.13573): plug-in coordinate compression for MeshAnything V2 / Edgerunner; improves mesh compactness for assets that need to be lightweight.
-
----
-
-## Panoramic room-scale reconstruction
-
-The `wall_pipeline.py` path handles 360° equirectangular room panoramas. It decomposes the panorama into per-wall perspective views, runs detection + Hunyuan3D-2 (or InstantMesh) on each detected furniture crop, then assembles a room shell (walls + floor + ceiling) with placed objects.
-
-### Depth estimation upgrade: MTPano
-
-`app/panoramic_depth.py` provides metric depth for room-scale panoramas using **MTPano** (SIGGRAPH 2026, arXiv:2602.05330). MTPano is a multi-task foundation model trained specifically on equirectangular images — it handles the spherical projection distortion that makes standard perspective depth models inaccurate near panorama edges and poles.
-
-Priority chain in `full_reconstruction_panoramic()`:
-
-```
-1. MTPano depth (panoramic-aware, metric)   ← new primary source
-2. GT depth file (pano_folder/full/depth.png)  ← Structured3D benchmark only
-3. No depth (wall distances used for placement) ← existing fallback
-```
-
-```bash
-# Override MTPano model ID (default: Evergreen0929/MTPano)
-MTPANO_MODEL_ID=Evergreen0929/MTPano uvicorn app.main:app --reload
-```
-
-### SOTA context (2026)
-
-- **PanoVGGT** (CVPR 2026, arXiv:2603.17571): takes multiple equirectangular panoramas → globally consistent 3D point cloud + depth + camera poses in a single forward pass. Uses spherical-aware positional encoding + SO(3) augmentation. Best choice if you have ≥2 panoramas of the same room (e.g. before/after shots). GitHub: `YijingGuo-June/PanoVGGT`.
-- **MTPano** (SIGGRAPH 2026, arXiv:2602.05330): single panorama → depth + surface normals + semantics. Label-free training via perspective pseudo-labels. **Current primary** for single-panorama captures.
-- **HY-World 2.0** (arXiv:2604.14268, Tencent): full world generation pipeline — panorama → trajectory → stereo expansion → composed 3D world (mesh + Gaussians). Exports to Unity/Unreal. Relevant if generating novel room views ever becomes a milestone.
-
-### Environment variables summary
-
-```
-MESH_ENGINE=hunyuan|instantmesh     # 3D generation backend (default: hunyuan)
-INSTANTMESH_ROOT=./InstantMesh      # path to cloned TencentARC/InstantMesh
-INSTANTMESH_CONFIG=configs/instant-mesh-large.yaml
-MTPANO_MODEL_ID=Evergreen0929/MTPano
-```
+- **Mesh-Pro** (CVPR 2026, arXiv:2603.00526, Tencent): framework RL asincron pentru generare mesh (ARPO); de 3.75× mai rapid decat metodele anterioare. Succesor InstantMesh.
+- **Hunyuan3D-2.1** (2026): adauga backbone dataset "LATTICE", detalii suprafata mai bune, varianta PBR. Cale directa de upgrade de la greutatile `tencent/Hunyuan3D-2` actuale.
+- **FreeMesh** (ICML 2025, arXiv:2505.13573): compresie coordonate plug-in pentru MeshAnything V2; imbunatateste compactitatea mesh-urilor.
 
 ---
 
-## Key design notes
+## Reconstructie la scara camerei (panorame)
 
-- **GPU memory discipline**: models are moved on/off device around each stage (`model.to(device)` before, `model.to("cpu")` + `cleanup_gpu()` after). Preserve this pattern when adding stages.
-- **Lazy imports**: `app/moodboard.py` and `app/restyle_2d.py` defer all heavy imports (torch, diffusers, CLIP, `reconstructor_pipeline`) to call time so the web tier stays importable on a CPU-only box.
-- **Diffusion fallback chain**: SD1.5 + ControlNet + IP-Adapter → retry without IP-Adapter → pure `apply_palette_projection` (CPU baseline). The CPU path is also the histogram-matching ablation arm for evaluation.
-- **Object class IDs**: the pipeline uses **Objects365** IDs throughout (D-FINE is the obj365 checkpoint). See `OBJ365_NAMES` in `reconstructor_pipeline.py`.
-- **Scene artifacts**: `data/user_<id>/scene_<id>/` holds `input.png`, `crops/`, `meshes/`, `structure/`, `variants/`, `committed/`, `final/scene_positioned.glb`. Don't restructure this layout without updating the download endpoints.
+Path-ul `wall_pipeline.py` trateaza panorame 360° equirectangulare. Descompune panorama in vederi perspective per-perete, ruleaza detectie + Hunyuan3D-2 (sau InstantMesh) pe fiecare crop de mobilier detectat, apoi asambleaza un shell de camera (pereti + podea + tavan) cu obiectele plasate.
+
+### Estimare adancime: MTPano
+
+`app/panoramic_depth.py` furnizeaza adancime metrica pentru panorame folosind **MTPano** (SIGGRAPH 2026, arXiv:2602.05330). MTPano e un model fondational multi-task antrenat specific pe imagini equirectangulare — trateaza distorsiunea proiectiei sferice care face modelele standard de adancime perspective inaccurate langa marginile si polii panoramei.
+
+Lantul de prioritate in `full_reconstruction_panoramic()`:
+```
+1. MTPano (aware de panorame, metric)         ← sursa primara noua
+2. Fisier GT depth (pano_folder/full/depth.png) ← doar pentru benchmark Structured3D
+3. Fara adancime (distante perete folosite)   ← fallback existent
+```
+
+### Context SOTA 2026 (panorame)
+
+- **PanoVGGT** (CVPR 2026, arXiv:2603.17571): ia mai multe panorame equirectangulare → nori de puncte 3D consistent globali + adancime + pose camera intr-un singur forward pass. Cel mai bun pentru capturi multi-vedere.
+- **MTPano** (SIGGRAPH 2026, arXiv:2602.05330): o singura panorama → adancime + normale suprafata + semantica. **Sursa primara actuala** pentru capturi cu o singura panorama.
+- **HY-World 2.0** (arXiv:2604.14268, Tencent): generare lume completa dintr-o panorama → mesh + Gaussiene 3D. Exporta in Unity/Unreal.
+
+---
+
+## Sistem validare umana
+
+Instrument de cercetare structurat pentru colectarea evaluarilor de la studenti de arhitectura. Proiectat pentru utilizare paralela cu Google Forms / Qualtrics.
+
+### Modelul de acces
+
+```
+Cercetator (JWT) → POST /evaluation/sessions
+                 ← { token, participant_url_hint: "/evaluation/{token}/view" }
+
+Distribuie URL participantilor (nu necesita cont)
+   GET /evaluation/{token}/view → pagina HTML cu toate variantele + viewer 3D
+
+Exporta:
+   GET /evaluation/export/profiles.csv       → demografice
+   GET /evaluation/export/variants_2d.csv    → evaluari per-varianta
+   GET /evaluation/export/variant_sets.csv   → comparatie cross-varianta
+   GET /evaluation/export/commit_3d.csv      → evaluari model 3D
+   GET /evaluation/export/all.csv            → toate tabelele concatenate
+```
+
+### Cele 4 formulare de evaluare
+
+#### Formular 1 — Profil evaluator (demografice, completat o data)
+
+Campuri: interval varsta, rol profesional, ani experienta, nivel educatie, specializare, tara educatie, software folosit, 3 scale Likert 1-5 (familiaritate cu instrumente AI, modelare 3D, software design interior).
+
+#### Formular 2 — Evaluare varianta 2D (completat o data per varianta)
+
+18 itemi Likert 1-7 pe 4 canale:
+
+| Canal | Itemi |
+|---|---|
+| Aparenta / paleta | Calitate estetica, armonie culori, fidelitate paleta fata de moodboard, atmosfera/dispozitie, adecvare temperatura culoare |
+| Structura / mobilier | Pastrare layout spatial, consistenta stil mobilier, plauzabilitate plasament mobilier, acuratete scala si proportii |
+| Realism | Fotorealism, plauzabilitate iluminat, calitate materiale/suprafete, calitate umbre si reflectii |
+| Profesional | Adecvare profesionala, prezentabilitate client, inovatie si creativitate, coerenta design |
+
+Plus itemi categorici si 4 campuri text deschis: aspectul cel mai atragator, aspectul cel mai problematic, sugestii de design, elemente care dezvaluie originea AI.
+
+#### Formular 3 — Comparatie set variante (completat o data dupa toate variantele)
+
+Proba esentiala de cercetare pentru afirmatia de disentanglement:
+- **Ranking**: lista de preferinta ordonata a ID-urilor de variante
+- **Perceptie disentanglement**: `palette_change_perceived`, `furniture_change_perceived`, `perceived_what_changed` (dict per-canal), `disentanglement_clarity` (1-7), `palette_axis_control_confidence` (1-7), `furniture_axis_control_confidence` (1-7)
+- **Proba scurgere**: `cross_channel_leakage_observed` (bool) + descriere — masoara daca o schimbare intentionata pentru un canal a alterat neintenționat celalalt
+- Evaluare instrument AI: utilitate, incredere, usurinta integrare workflow, timp economisit vs manual
+
+#### Formular 4 — Evaluare commit 3D (completat dupa viewer-ul 3D)
+
+18 itemi: acuratete geometrie (completitudine mesh, acuratete dimensiuni spatiale, acuratete geometrie mobilier, prezenta artefacte), aparenta (calitate textura, reprezentare materiale, fidelitate paleta 3D, nivel detaliu suprafata), fidelitate 2D→3D (4 itemi), aplicabilitate profesionala (utilizabilitate pentru modelare ulterioara, BIM readiness, calitate prezentare, scor global).
+
+### Variabile cheie pentru analiza statistica
+
+| Variabila | Tabel | Utilizare |
+|---|---|---|
+| `palette_fidelity_to_moodboard` (1-7) | variant_2d | Fidelitate canal paleta |
+| `spatial_layout_preservation` (1-7) | variant_2d | Fidelitate canal structura |
+| `disentanglement_clarity` (1-7) | variant_sets | Independenta perceputa a axelor |
+| `cross_channel_leakage_observed` (bool) | variant_sets | Scurgere masurata |
+| `palette_change_perceived` / `furniture_change_perceived` | variant_sets | Proba de perceptie |
+| `engine_type` (`diffusion` / `baseline`) | variant_2d | Eticheta brat ablatie |
+| `presentation_position` (1..N) | variant_2d | Covariabila bias pozitie |
+| `fidelity_2d_to_3d` (1-7) | commit_3d | Fidelitate pipeline 2D→3D |
+
+---
+
+## Note tehnice importante
+
+- **Disciplina memorie GPU**: modele mutate pe/de pe device in jurul fiecarui stage (`model.to(device)` inainte, `model.to("cpu")` + `cleanup_gpu()` dupa). Pastreaza asta cand adaugi stage-uri.
+- **Import-uri lazy**: `app/moodboard.py` si `app/restyle_2d.py` amana toate import-urile grele (torch, diffusers, CLIP, `reconstructor_pipeline`) pana la momentul apelului, asa ca tier-ul web ramane importabil pe o masina fara GPU.
+- **Lant fallback difuzie**: SD1.5 + ControlNet + IP-Adapter → retry fara IP-Adapter → `apply_palette_projection` pur (baseline CPU). Path-ul CPU e si bratul de ablatie histogram-matching pentru evaluare.
+- **ID-uri clase obiecte**: pipeline-ul foloseste ID-uri **Objects365** peste tot (D-FINE e checkpoint-ul obj365). Vezi `OBJ365_NAMES` in `reconstructor_pipeline.py`.
+- **Artefacte scene**: `data/user_<id>/scene_<id>/` contine `input.png`, `crops/`, `meshes/`, `structure/`, `variants/`, `committed/`, `final/scene_positioned.glb`. Nu restructura asta fara sa actualizezi endpointurile de download.

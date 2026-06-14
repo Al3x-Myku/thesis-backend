@@ -1,0 +1,42 @@
+{
+  "wall_idx": 0,
+  "yaw_rad": -1.7027186745530616,
+  "yaw_deg": -97.55859375,
+  "angular_width_rad": 1.5401167110371836,
+  "angular_width_deg": 88.24218749999999,
+  "fov_deg": 108.24218749999999,
+  "normal": [
+    0.991311,
+    0.0,
+    0.13154
+  ],
+  "center_3d": [
+    -0.9219,
+    -2.6657,
+    -0.1223
+  ],
+  "left_corner_3d": [
+    -0.5767,
+    -5.2743,
+    -0.7296
+  ],
+  "right_corner_3d": [
+    -0.747,
+    -5.2743,
+    0.554
+  ],
+  "width_m": 1.2949,
+  "height_m": 5.2172,
+  "floor_y": -5.2743,
+  "ceiling_y": -0.0571,
+  "pano_w": 1024,
+  "pano_h": 512,
+  "left_corner_azimuth_rad": -2.4727770300716534,
+  "right_corner_azimuth_rad": -0.9326603190344698,
+  "rgb_path": "benchmark_results/fast_10/scenes/scene_01058_388337_pano/wall_views/wall_00_rgb.jpg",
+  "depth_path": "benchmark_results/fast_10/scenes/scene_01058_388337_pano/wall_views/wall_00_depth.png",
+  "semantic_path": "benchmark_results/fast_10/scenes/scene_01058_388337_pano/wall_views/wall_00_semantic.png",
+  "meta_path": "benchmark_results/fast_10/scenes/scene_01058_388337_pano/wall_views/wall_00_meta.json",
+  "overlaps_left": true,
+  "overlaps_right": true
+}

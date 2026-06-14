@@ -1,0 +1,443 @@
+{
+  "pano_folder": "data/Structured3D/Structured3D/scene_00000/2D_rendering/485142/panorama",
+  "pano_w": 1024,
+  "pano_h": 512,
+  "n_corners": 16,
+  "n_walls": 8,
+  "corners": [
+    {
+      "x_pixel": 63.0,
+      "y_ceiling_pixel": 146.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": -2.755029
+    },
+    {
+      "x_pixel": 63.0,
+      "y_ceiling_pixel": 405.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": -2.755029
+    },
+    {
+      "x_pixel": 124.0,
+      "y_ceiling_pixel": 99.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": -2.380738
+    },
+    {
+      "x_pixel": 124.0,
+      "y_ceiling_pixel": 446.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": -2.380738
+    },
+    {
+      "x_pixel": 232.0,
+      "y_ceiling_pixel": 210.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": -1.718058
+    },
+    {
+      "x_pixel": 232.0,
+      "y_ceiling_pixel": 327.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": -1.718058
+    },
+    {
+      "x_pixel": 337.0,
+      "y_ceiling_pixel": 215.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": -1.073787
+    },
+    {
+      "x_pixel": 337.0,
+      "y_ceiling_pixel": 320.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": -1.073787
+    },
+    {
+      "x_pixel": 463.0,
+      "y_ceiling_pixel": 179.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": -0.30066
+    },
+    {
+      "x_pixel": 463.0,
+      "y_ceiling_pixel": 369.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": -0.30066
+    },
+    {
+      "x_pixel": 631.0,
+      "y_ceiling_pixel": 132.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": 0.730175
+    },
+    {
+      "x_pixel": 631.0,
+      "y_ceiling_pixel": 419.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": 0.730175
+    },
+    {
+      "x_pixel": 697.0,
+      "y_ceiling_pixel": 176.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": 1.135146
+    },
+    {
+      "x_pixel": 697.0,
+      "y_ceiling_pixel": 373.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": 1.135146
+    },
+    {
+      "x_pixel": 865.0,
+      "y_ceiling_pixel": 182.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": 2.165981
+    },
+    {
+      "x_pixel": 865.0,
+      "y_ceiling_pixel": 366.0,
+      "y_floor_pixel": 512.0,
+      "azimuth_rad": 2.165981
+    }
+  ],
+  "walls": [
+    {
+      "wall_idx": 0,
+      "yaw_rad": -2.5678838389205634,
+      "yaw_deg": -147.12890625,
+      "angular_width_rad": 0.37429131224409673,
+      "angular_width_deg": 21.445312500000018,
+      "fov_deg": 70.0,
+      "normal": [
+        0.542751,
+        0.0,
+        0.839894
+      ],
+      "center_3d": [
+        -0.5856,
+        -3.0464,
+        -0.9062
+      ],
+      "left_corner_3d": [
+        -0.4068,
+        -6.1193,
+        -0.9994
+      ],
+      "right_corner_3d": [
+        -0.744,
+        -6.1193,
+        -0.7815
+      ],
+      "width_m": 0.4015,
+      "height_m": 6.1458,
+      "floor_y": -6.1193,
+      "ceiling_y": 0.0265,
+      "pano_w": 1024,
+      "pano_h": 512,
+      "left_corner_azimuth_rad": -2.7550294950426117,
+      "right_corner_azimuth_rad": -2.380738182798515,
+      "rgb_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_00_rgb.jpg",
+      "depth_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_00_depth.png",
+      "semantic_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_00_semantic.png",
+      "meta_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_00_meta.json",
+      "overlaps_left": true,
+      "overlaps_right": true
+    },
+    {
+      "wall_idx": 1,
+      "yaw_rad": -2.0493983326152163,
+      "yaw_deg": -117.42187499999999,
+      "angular_width_rad": 0.662679700366597,
+      "angular_width_deg": 37.96875,
+      "fov_deg": 70.0,
+      "normal": [
+        0.88764,
+        0.0,
+        0.460539
+      ],
+      "center_3d": [
+        -0.7305,
+        -2.5284,
+        -0.379
+      ],
+      "left_corner_3d": [
+        -0.5675,
+        -4.6675,
+        -0.5961
+      ],
+      "right_corner_3d": [
+        -0.8141,
+        -4.6675,
+        -0.1208
+      ],
+      "width_m": 0.5355,
+      "height_m": 4.2782,
+      "floor_y": -4.6675,
+      "ceiling_y": -0.3893,
+      "pano_w": 1024,
+      "pano_h": 512,
+      "left_corner_azimuth_rad": -2.380738182798515,
+      "right_corner_azimuth_rad": -1.718058482431918,
+      "rgb_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_01_rgb.jpg",
+      "depth_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_01_depth.png",
+      "semantic_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_01_semantic.png",
+      "meta_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_01_meta.json",
+      "overlaps_left": true,
+      "overlaps_right": true
+    },
+    {
+      "wall_idx": 2,
+      "yaw_rad": -1.3959225169759333,
+      "yaw_deg": -79.98046874999999,
+      "angular_width_rad": 0.6442719309119693,
+      "angular_width_deg": 36.9140625,
+      "fov_deg": 70.0,
+      "normal": [
+        0.984749,
+        0.0,
+        -0.173984
+      ],
+      "center_3d": [
+        -2.5328,
+        -5.1187,
+        0.4475
+      ],
+      "left_corner_3d": [
+        -2.5442,
+        -10.0,
+        -0.3774
+      ],
+      "right_corner_3d": [
+        -2.2608,
+        -10.0,
+        1.2263
+      ],
+      "width_m": 1.6286,
+      "height_m": 9.7626,
+      "floor_y": -10.0,
+      "ceiling_y": -0.2374,
+      "pano_w": 1024,
+      "pano_h": 512,
+      "left_corner_azimuth_rad": -1.718058482431918,
+      "right_corner_azimuth_rad": -1.0737865515199487,
+      "rgb_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_02_rgb.jpg",
+      "depth_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_02_depth.png",
+      "semantic_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_02_semantic.png",
+      "meta_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_02_meta.json",
+      "overlaps_left": true,
+      "overlaps_right": true
+    },
+    {
+      "wall_idx": 3,
+      "yaw_rad": -0.6872233929727671,
+      "yaw_deg": -39.37499999999999,
+      "angular_width_rad": 0.7731263170943631,
+      "angular_width_deg": 44.29687499999999,
+      "fov_deg": 70.0,
+      "normal": [
+        0.634393,
+        0.0,
+        -0.77301
+      ],
+      "center_3d": [
+        -1.6148,
+        -4.9492,
+        1.9677
+      ],
+      "left_corner_3d": [
+        -2.2375,
+        -10.0,
+        1.2137
+      ],
+      "right_corner_3d": [
+        -0.7539,
+        -10.0,
+        2.4313
+      ],
+      "width_m": 1.9193,
+      "height_m": 10.1016,
+      "floor_y": -10.0,
+      "ceiling_y": 0.1016,
+      "pano_w": 1024,
+      "pano_h": 512,
+      "left_corner_azimuth_rad": -1.0737865515199487,
+      "right_corner_azimuth_rad": -0.30066023442558565,
+      "rgb_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_03_rgb.jpg",
+      "depth_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_03_depth.png",
+      "semantic_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_03_semantic.png",
+      "meta_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_03_meta.json",
+      "overlaps_left": true,
+      "overlaps_right": true
+    },
+    {
+      "wall_idx": 4,
+      "yaw_rad": 0.2147573103039897,
+      "yaw_deg": 12.304687499999996,
+      "angular_width_rad": 1.030835089459151,
+      "angular_width_deg": 59.0625,
+      "fov_deg": 79.0625,
+      "normal": [
+        -0.21311,
+        0.0,
+        -0.977028
+      ],
+      "center_3d": [
+        0.3026,
+        -4.0026,
+        1.3874
+      ],
+      "left_corner_3d": [
+        -0.4205,
+        -8.0532,
+        1.3563
+      ],
+      "right_corner_3d": [
+        0.9471,
+        -8.0532,
+        1.058
+      ],
+      "width_m": 1.3998,
+      "height_m": 8.1012,
+      "floor_y": -8.0532,
+      "ceiling_y": 0.0479,
+      "pano_w": 1024,
+      "pano_h": 512,
+      "left_corner_azimuth_rad": -0.30066023442558565,
+      "right_corner_azimuth_rad": 0.7301748550335652,
+      "rgb_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_04_rgb.jpg",
+      "depth_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_04_depth.png",
+      "semantic_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_04_semantic.png",
+      "meta_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_04_meta.json",
+      "overlaps_left": true,
+      "overlaps_right": true
+    },
+    {
+      "wall_idx": 5,
+      "yaw_rad": 0.9326603190344702,
+      "yaw_deg": 53.43750000000002,
+      "angular_width_rad": 0.4049709280018092,
+      "angular_width_deg": 23.203124999999996,
+      "fov_deg": 70.0,
+      "normal": [
+        -0.803208,
+        0.0,
+        -0.595699
+      ],
+      "center_3d": [
+        1.0096,
+        -3.728,
+        0.7488
+      ],
+      "left_corner_3d": [
+        0.8384,
+        -7.1288,
+        0.9365
+      ],
+      "right_corner_3d": [
+        1.1396,
+        -7.1288,
+        0.5305
+      ],
+      "width_m": 0.5056,
+      "height_m": 6.8016,
+      "floor_y": -7.1288,
+      "ceiling_y": -0.3272,
+      "pano_w": 1024,
+      "pano_h": 512,
+      "left_corner_azimuth_rad": 0.7301748550335652,
+      "right_corner_azimuth_rad": 1.1351457830353744,
+      "rgb_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_05_rgb.jpg",
+      "depth_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_05_depth.png",
+      "semantic_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_05_semantic.png",
+      "meta_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_05_meta.json",
+      "overlaps_left": true,
+      "overlaps_right": true
+    },
+    {
+      "wall_idx": 6,
+      "yaw_rad": 1.6505633277649494,
+      "yaw_deg": 94.57031249999997,
+      "angular_width_rad": 1.030835089459151,
+      "angular_width_deg": 59.0625,
+      "fov_deg": 79.0625,
+      "normal": [
+        -0.99682,
+        0.0,
+        0.079682
+      ],
+      "center_3d": [
+        1.9378,
+        -5.129,
+        -0.1549
+      ],
+      "left_corner_3d": [
+        1.7624,
+        -10.0,
+        0.8204
+      ],
+      "right_corner_3d": [
+        1.6097,
+        -10.0,
+        -1.0899
+      ],
+      "width_m": 1.9164,
+      "height_m": 9.742,
+      "floor_y": -10.0,
+      "ceiling_y": -0.258,
+      "pano_w": 1024,
+      "pano_h": 512,
+      "left_corner_azimuth_rad": 1.1351457830353744,
+      "right_corner_azimuth_rad": 2.1659808724945253,
+      "rgb_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_06_rgb.jpg",
+      "depth_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_06_depth.png",
+      "semantic_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_06_semantic.png",
+      "meta_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_06_meta.json",
+      "overlaps_left": true,
+      "overlaps_right": true
+    },
+    {
+      "wall_idx": 7,
+      "yaw_rad": 2.8470683423157492,
+      "yaw_deg": 163.12499999999994,
+      "angular_width_rad": 1.3621749396424487,
+      "angular_width_deg": 78.04687499999996,
+      "fov_deg": 98.04687499999996,
+      "normal": [
+        -0.290285,
+        0.0,
+        0.95694
+      ],
+      "center_3d": [
+        0.436,
+        -4.2591,
+        -1.4373
+      ],
+      "left_corner_3d": [
+        1.2437,
+        -8.5183,
+        -0.8421
+      ],
+      "right_corner_3d": [
+        -0.5663,
+        -8.5183,
+        -1.3912
+      ],
+      "width_m": 1.8914,
+      "height_m": 8.5183,
+      "floor_y": -8.5183,
+      "ceiling_y": 0.0,
+      "pano_w": 1024,
+      "pano_h": 512,
+      "left_corner_azimuth_rad": 2.1659808724945253,
+      "right_corner_azimuth_rad": -2.7550294950426117,
+      "rgb_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_07_rgb.jpg",
+      "depth_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_07_depth.png",
+      "semantic_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_07_semantic.png",
+      "meta_path": "/home/al3xmyku/thesis-backend/benchmark_results/scene_00000_485142_out/wall_views/wall_07_meta.json",
+      "overlaps_left": true,
+      "overlaps_right": true
+    }
+  ]
+}

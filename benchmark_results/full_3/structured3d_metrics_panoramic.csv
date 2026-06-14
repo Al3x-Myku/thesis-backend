@@ -1,0 +1,4 @@
+scene_id,mode,n_gt_visible,n_pred_objects,n_matched,recall,mean_placement_err,median_placement_err,mean_size_err_pct,mean_rel_dist_err_m
+scene_01058_400641_pano,panoramic,91,63,23,0.2527,1.1921,1.1563,1069.5969,0.4209
+scene_01058_391880_pano,panoramic,125,41,39,0.3120,1.0717,1.0403,49.7893,0.5643
+scene_01058_391620_pano,panoramic,143,3,3,0.0210,0.2826,0.2979,28.6794,0.3183
