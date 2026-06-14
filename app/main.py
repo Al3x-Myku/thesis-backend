@@ -7,6 +7,7 @@ from app.routers.scenes import router as scenes_router
 from app.routers.debug import router as debug_router
 from app.routers.auth import router as auth_router
 from app.routers.design import router as design_router
+from app.routers.evaluation import router as evaluation_router
 
 app = FastAPI(
     title="Interior-3D API",
@@ -30,3 +31,4 @@ app.include_router(scenes_router)
 app.include_router(debug_router)
 app.include_router(auth_router)
 app.include_router(design_router)
+app.include_router(evaluation_router)

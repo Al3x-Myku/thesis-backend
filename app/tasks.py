@@ -2,6 +2,7 @@ import app.models.user
 import app.models.scene
 import app.models.moodboard
 import app.models.design
+import app.models.evaluation
 from pathlib import Path
 from app.celery_app import celery_app
 from app.database import engine
