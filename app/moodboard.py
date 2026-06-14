@@ -313,6 +313,9 @@ def _embed_crops(crop_paths: List[str]) -> np.ndarray:
             inputs = processor(images=img, return_tensors="pt").to(device)
             with torch.no_grad():
                 feat = model.get_image_features(**inputs)
+            # transformers ≥5 returns BaseModelOutputWithPooling; extract tensor
+            if not isinstance(feat, torch.Tensor):
+                feat = feat.pooler_output
             feat = feat / feat.norm(p=2, dim=-1, keepdim=True)
             embeds.append(feat[0].cpu().float().numpy())
     finally:

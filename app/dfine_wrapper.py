@@ -1,3 +1,4 @@
+import os
 import sys
 import subprocess
 from pathlib import Path
@@ -33,5 +34,12 @@ def run_dfine_inference(
     if output_dir:
         cmd += ["-o", output_dir]
 
+    # Prepend D-FINE root to PYTHONPATH so its local `src/` package takes priority
+    # over any installed `src` package in the conda env (torch_inf.py uses sys.path.append
+    # which would otherwise lose to installed packages).
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(Path(dfine_root).resolve()) + ((":" + existing) if existing else "")
+
     print("Running D-FINE:", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    subprocess.run(cmd, check=True, env=env)

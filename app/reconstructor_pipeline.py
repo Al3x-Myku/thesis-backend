@@ -335,44 +335,92 @@ def validate_mesh(mesh, scene_id: str, obj_idx: int) -> bool:
         logger.warning(f"[{scene_id}] obj{obj_idx}: REJECT mesh — validation error: {e}")
         return False
 
+_HF_DFINE_MODEL_ID = "ustc-community/dfine_x_obj365"
+
+
+def _detect_objects_hf(image_path: str, crop_dir: Path, scene_id: str) -> List[Tuple[int, str, List[int], float, int]]:
+    """Fallback detector using the HF Transformers D-FINE model (same weights, different loader).
+    Writes crop PNGs and box_txt sidecars identical to the subprocess path."""
+    logger.info(f"[{scene_id}] D-FINE subprocess unavailable; using HF Transformers fallback.")
+    proc = _models_cache.get("dfine_proc")
+    model = _models_cache.get("dfine_hf")
+    if proc is None or model is None:
+        from transformers import AutoImageProcessor, AutoModelForObjectDetection
+        proc = AutoImageProcessor.from_pretrained(_HF_DFINE_MODEL_ID)
+        model = AutoModelForObjectDetection.from_pretrained(_HF_DFINE_MODEL_ID, torch_dtype=torch.float32)
+        _models_cache["dfine_proc"] = proc
+        _models_cache["dfine_hf"] = model
+
+    model.to(PIPELINE_DEVICE)
+    img = Image.open(image_path).convert("RGB")
+    inputs = proc(images=img, return_tensors="pt").to(PIPELINE_DEVICE)
+    with torch.no_grad():
+        out = model(**inputs)
+    model.to("cpu")
+
+    results = proc.post_process_object_detection(out, threshold=MIN_DETECTION_CONFIDENCE, target_sizes=[img.size[::-1]])[0]
+    crops_data = []
+    for idx, (box, score, label_id) in enumerate(zip(results["boxes"], results["scores"], results["labels"])):
+        x0, y0, x1, y1 = [int(v) for v in box.tolist()]
+        x0, y0 = max(0, x0), max(0, y0)
+        x1, y1 = min(img.width, x1), min(img.height, y1)
+        if x1 <= x0 or y1 <= y0:
+            continue
+        crop = img.crop((x0, y0, x1, y1))
+        crop_path = crop_dir / f"crop{idx}.png"
+        crop.save(str(crop_path))
+        box_txt = crop_dir / f"crop{idx}_box.txt"
+        box_txt.write_text(f"{x0},{y0},{x1},{y1},{score.item():.4f},{label_id.item()}")
+        crops_data.append((idx, str(crop_path), [x0, y0, x1, y1], float(score.item()), int(label_id.item())))
+    return crops_data
+
+
 def detect_objects(image_path: str, scene_folder: str, scene_id: str) -> List[Tuple[str, List[int], float, int]]:
 
     crop_dir = Path(scene_folder) / "crops"
     crop_dir.mkdir(parents=True, exist_ok=True)
 
-    with ThesisProfiler("2D_Detection_DFINE", scene_id):
-        run_dfine_inference(
-            dfine_root=DFINE_ROOT,
-            config_path=DFINE_CONFIG,
-            checkpoint_path=DFINE_CHECKPT,
-            input_image=image_path,
-            device=PIPELINE_DEVICE,
-            output_dir=str(crop_dir),
-        )
+    crops_data: List[Tuple[int, str, List[int], float, int]] = []
+    try:
+        with ThesisProfiler("2D_Detection_DFINE", scene_id):
+            run_dfine_inference(
+                dfine_root=DFINE_ROOT,
+                config_path=DFINE_CONFIG,
+                checkpoint_path=DFINE_CHECKPT,
+                input_image=image_path,
+                device=PIPELINE_DEVICE,
+                output_dir=str(crop_dir),
+            )
 
-    pattern = re.compile(r"crop(\d+)\.(?:png|jpg|jpeg)$")
-    crops_data = []
-    for ext in ("png", "jpg", "jpeg"):
-        for p in crop_dir.rglob(f"*crop*.{ext}"):
-            m = pattern.search(p.name)
-            if m:
-                crop_idx = int(m.group(1))
-                box_txt = p.with_name(f"{p.stem}_box.txt")
-                box = [0, 0, 0, 0]
-                score = 1.0
-                label = -1
-                if box_txt.exists():
-                    try:
-                        with open(box_txt, "r") as f:
-                            parts = f.read().strip().split(",")
-                        box = list(map(int, parts[:4]))
-                        if len(parts) >= 5:
-                            score = float(parts[4])
-                        if len(parts) >= 6:
-                            label = int(parts[5])
-                    except Exception:
-                        pass
-                crops_data.append((crop_idx, str(p), box, score, label))
+        pattern = re.compile(r"crop(\d+)\.(?:png|jpg|jpeg)$")
+        for ext in ("png", "jpg", "jpeg"):
+            for p in crop_dir.rglob(f"*crop*.{ext}"):
+                m = pattern.search(p.name)
+                if m:
+                    crop_idx = int(m.group(1))
+                    box_txt = p.with_name(f"{p.stem}_box.txt")
+                    box = [0, 0, 0, 0]
+                    score = 1.0
+                    label = -1
+                    if box_txt.exists():
+                        try:
+                            with open(box_txt, "r") as f:
+                                parts = f.read().strip().split(",")
+                            box = list(map(int, parts[:4]))
+                            if len(parts) >= 5:
+                                score = float(parts[4])
+                            if len(parts) >= 6:
+                                label = int(parts[5])
+                        except Exception:
+                            pass
+                    crops_data.append((crop_idx, str(p), box, score, label))
+    except Exception as e:
+        logger.warning(f"[{scene_id}] D-FINE subprocess failed ({e}); trying HF Transformers fallback.")
+        try:
+            crops_data = _detect_objects_hf(image_path, crop_dir, scene_id)
+        except Exception as e2:
+            logger.warning(f"[{scene_id}] HF D-FINE fallback also failed ({e2}); no detections.")
+            return []
 
     if not crops_data:
         logger.warning(f"[{scene_id}] No objects detected by D-FINE.")

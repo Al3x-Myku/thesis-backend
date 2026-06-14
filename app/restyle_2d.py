@@ -215,11 +215,15 @@ def get_restyle_pipeline():
             )
             try:
                 pipe.load_ip_adapter("h94/IP-Adapter", subfolder="models", weight_name="ip-adapter_sd15.bin")
+                pipe.set_ip_adapter_scale(0.6)
                 pipe._has_ip_adapter = True
+                # enable_attention_slicing must NOT be called after load_ip_adapter:
+                # it replaces IPAdapterAttnProcessor2_0 with SlicedAttnProcessor which
+                # cannot handle the tuple encoder_hidden_states IP-Adapter passes.
             except Exception as e:
                 logger.warning(f"[restyle] IP-Adapter unavailable ({e}); palette via projection only.")
                 pipe._has_ip_adapter = False
-            pipe.enable_attention_slicing()
+                pipe.enable_attention_slicing()
             cache["restyle"] = pipe
         except Exception as e:
             logger.warning(f"[restyle] diffusion stack unavailable ({e}); using palette-projection baseline.")
@@ -315,15 +319,13 @@ def render_variant(
         pipe.to(device)
         out = pipe(**kwargs).images[0].resize(room.size)
     except Exception as e:
-        logger.warning(f"[restyle] Diffusion inference failed ({e}); falling back to palette-projection baseline.")
-        if getattr(pipe, "_has_ip_adapter", False):
-            # IP-Adapter may be incompatible with this diffusers version; retry without it.
-            kwargs.pop("ip_adapter_image", None)
-            pipe._has_ip_adapter = False
-            try:
-                out = pipe(**kwargs).images[0].resize(room.size)
-            except Exception as e2:
-                logger.warning(f"[restyle] Diffusion retry also failed ({e2}); palette-projection only.")
+        logger.warning(f"[restyle] Diffusion inference failed ({e}); palette-projection fallback.")
+        try:
+            # Retry without IP-Adapter as last resort (does not permanently disable it).
+            fallback_kwargs = {k: v for k, v in kwargs.items() if k != "ip_adapter_image"}
+            out = pipe(**fallback_kwargs).images[0].resize(room.size)
+        except Exception as e2:
+            logger.warning(f"[restyle] Diffusion retry also failed ({e2}); palette-projection only.")
     finally:
         pipe.to("cpu")
         rp.cleanup_gpu(False)
