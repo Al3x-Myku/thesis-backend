@@ -126,8 +126,13 @@ def analyze_moodboard(self, session_id: int) -> int:
 
 
 @celery_app.task(bind=True)
-def generate_2d_variants(self, session_id: int, n: int = 4) -> list:
-    """Render N 2D restyle variants of the room from the session's DesignSpec."""
+def generate_2d_variants(self, session_id: int, n: int = 4, mode: str = "full") -> list:
+    """Render N 2D restyle variants of the room from the session's DesignSpec.
+
+    mode: "full" — palette + moodboard furniture crops condition the diffusion.
+          "palette_only" — only the colour palette is applied; furniture style from
+          the moodboard is excluded so the room's own furniture is preserved cleanly.
+    """
     from app.moodboard import DesignSpec
     from app.restyle_2d import generate_variants, build_variant_plans
 
@@ -148,7 +153,7 @@ def generate_2d_variants(self, session_id: int, n: int = 4) -> list:
         folder = str(design_service.scene_folder(owner_id, scene_id))
 
         image_paths = generate_variants(
-            room_photo, folder, str(scene_id), spec, n, start_index=start_index
+            room_photo, folder, str(scene_id), spec, n, start_index=start_index, mode=mode
         )
         plans = build_variant_plans(spec, n, start_index=start_index)
 

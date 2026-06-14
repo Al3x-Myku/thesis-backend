@@ -92,7 +92,9 @@ def session_summary(db: Session, sess: DesignSession) -> Dict[str, Any]:
 
 # ── Variant generation / feedback / regeneration ─────────────────────────────
 
-def request_variants(db: Session, owner_id: int, session_id: int, n: int) -> DesignSession:
+def request_variants(
+    db: Session, owner_id: int, session_id: int, n: int, mode: str = "full"
+) -> DesignSession:
     sess = get_session(db, owner_id, session_id)
     if sess.status not in (DesignStatus.READY, DesignStatus.COMMITTED):
         raise HTTPException(
@@ -100,7 +102,7 @@ def request_variants(db: Session, owner_id: int, session_id: int, n: int) -> Des
             f"Session not ready for variant generation (status={sess.status}).",
         )
     design_repo.set_session_status(db, session_id, DesignStatus.GENERATING, progress=0.0)
-    celery_app.send_task("app.tasks.generate_2d_variants", args=(session_id, n))
+    celery_app.send_task("app.tasks.generate_2d_variants", args=(session_id, n, mode))
     return design_repo.get_session(db, session_id)
 
 

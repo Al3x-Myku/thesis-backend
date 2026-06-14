@@ -57,6 +57,12 @@ def parse_args():
                    help="Index (0-based) of variant to commit to 3D. Pass -1 to skip 3D commit.")
     p.add_argument("--engine", choices=["hunyuan", "instantmesh"], default="hunyuan",
                    help="Mesh generation engine for 3D commit (server must have MESH_ENGINE set accordingly)")
+    p.add_argument("--mode", choices=["full", "palette_only"], default="full",
+                   help=(
+                       "full: palette swatch + moodboard furniture crops condition the diffusion. "
+                       "palette_only: only colour palette applied — use when you want the room's "
+                       "own furniture preserved with no style bleed from the moodboard."
+                   ))
     p.add_argument("--poll-interval", type=int, default=10, help="Seconds between status polls")
     p.add_argument("--timeout", type=int, default=1800, help="Max seconds to wait per stage")
     p.add_argument("--skip-reconstruction", action="store_true",
@@ -225,8 +231,8 @@ def run_pair(client: Client, pair_dir: Path, args) -> dict:
 
     # ── Step 5: Generate variants ─────────────────────────────────────────────
     if not meta.get("variant_ids"):
-        print(f"  [5/5] Requesting {args.variants} variants...")
-        client.post(f"/scenes/{scene_id}/design/variants?n={args.variants}")
+        print(f"  [5/5] Requesting {args.variants} variants (mode={args.mode})...")
+        client.post(f"/scenes/{scene_id}/design/variants?n={args.variants}&mode={args.mode}")
 
         # Poll until READY again (task sets GENERATING then back to READY)
         poll(

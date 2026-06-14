@@ -231,11 +231,45 @@ def get_restyle_pipeline():
     return cache["restyle"]
 
 
-def _style_prompt(spec: DesignSpec) -> str:
+def _style_prompt(spec: DesignSpec, mode: str = "full") -> str:
+    if mode == "palette_only":
+        return "interior room, cohesive color palette, tasteful furnishing, photorealistic, high quality"
     cats = [it.category_name for it in spec.furniture.items]
     uniq = list(dict.fromkeys(cats))[:6]
     furniture_str = (", with " + ", ".join(uniq)) if uniq else ""
     return f"interior room, cohesive color palette, tasteful furnishing{furniture_str}, photorealistic, high quality"
+
+
+def _ip_adapter_style_image(spec: DesignSpec, mode: str = "full") -> Image.Image:
+    """Compose the IP-Adapter style image.
+
+    palette_only — palette swatch only (pure colour conditioning).
+    full         — collage: palette swatch (top) + top-3 moodboard furniture crops (bottom).
+                   Furniture crops inject visual style identity into the diffusion process,
+                   not just text-token hints.
+    """
+    palette_img = palette_swatch_image(spec.palette, size=512)
+
+    if mode == "palette_only" or not spec.furniture.items:
+        return palette_img
+
+    crops: List[Image.Image] = []
+    for item in spec.furniture.items[:3]:
+        try:
+            crops.append(Image.open(item.source_crop_path).convert("RGB").resize((256, 256)))
+        except Exception:
+            continue
+
+    if not crops:
+        return palette_img
+
+    # Top 256 px: palette swatch; bottom 256 px: furniture crops side by side.
+    total_w = max(512, len(crops) * 256)
+    collage = Image.new("RGB", (total_w, 512), (128, 128, 128))
+    collage.paste(palette_img.resize((total_w, 256)), (0, 0))
+    for i, crop in enumerate(crops):
+        collage.paste(crop, (i * 256, 256))
+    return collage
 
 
 def _composite_locked_slots(
@@ -273,14 +307,18 @@ def render_variant(
     plan: VariantPlan,
     out_path: str,
     parent_image: Optional[Image.Image] = None,
+    mode: str = "full",
 ) -> str:
-    """Render one 2D variant. Uses the diffusion pipeline when available (ControlNet
-    structure + IP-Adapter style), then applies palette projection. Falls back to a
-    pure palette-projected room photo when diffusion is unavailable.
+    """Render one 2D variant.
 
-    If ``parent_image`` is provided, pixel regions corresponding to locked furniture
-    slots in ``plan.locked_fields`` are composited verbatim from the parent so they
-    stay byte-identical (M4 pixel-exact freezing)."""
+    Args:
+        mode: ``"full"`` (default) — palette swatch + moodboard furniture crops
+              condition IP-Adapter; furniture categories included in text prompt.
+              ``"palette_only"`` — only the palette swatch conditions IP-Adapter;
+              furniture categories excluded from the prompt. Use this when you want
+              the room's own furniture layout preserved with no style bleed from the
+              moodboard furniture crops.
+    """
     room: Image.Image = structure["room"]
 
     pipe = None
@@ -307,13 +345,13 @@ def render_variant(
     device = rp.PIPELINE_DEVICE
     generator = torch.manual_seed(plan.seed)
     kwargs: Dict[str, Any] = dict(
-        prompt=_style_prompt(spec),
+        prompt=_style_prompt(spec, mode=mode),
         image=control,
         num_inference_steps=30,
         generator=generator,
     )
     if getattr(pipe, "_has_ip_adapter", False):
-        kwargs["ip_adapter_image"] = palette_swatch_image(spec.palette)
+        kwargs["ip_adapter_image"] = _ip_adapter_style_image(spec, mode=mode)
     out = None
     try:
         pipe.to(device)
@@ -356,6 +394,7 @@ def generate_variants(
     start_index: int = 0,
     locked: Optional[Dict[str, Any]] = None,
     parent_image_path: Optional[str] = None,
+    mode: str = "full",
 ) -> List[str]:
     """Produce N 2D variant PNGs under ``scene_folder/variants/``. Reuses one
     structure-conditioning build for all variants.
@@ -378,6 +417,6 @@ def generate_variants(
     paths: List[str] = []
     for plan in plans:
         out_path = str(variants_dir / f"variant_{plan.variant_index}.png")
-        render_variant(structure, spec, plan, out_path, parent_image=parent_image)
+        render_variant(structure, spec, plan, out_path, parent_image=parent_image, mode=mode)
         paths.append(out_path)
     return paths

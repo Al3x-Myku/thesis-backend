@@ -58,11 +58,12 @@ def get_design(
 def generate_variants(
     scene_id: int = PathParam(...),
     n: int = Query(4, ge=1, le=12),
+    mode: str = Query("full", regex="^(full|palette_only)$"),
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     sess = _latest_session_or_404(db, current_user.id, scene_id)
-    sess = design_service.request_variants(db, current_user.id, sess.id, n)
+    sess = design_service.request_variants(db, current_user.id, sess.id, n, mode=mode)
     return design_service.session_summary(db, sess)
 
 
