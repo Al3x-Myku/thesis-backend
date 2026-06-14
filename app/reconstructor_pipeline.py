@@ -63,7 +63,9 @@ _models_cache = {
     "birefnet": None,
     "shape_pipeline": None,
     "paint_pipeline": None,
-    "depth_model": None
+    "depth_model": None,
+    "clip": None,
+    "restyle": None,
 }
 
 class ThesisProfiler:
@@ -386,7 +388,7 @@ def detect_objects(image_path: str, scene_folder: str, scene_id: str) -> List[Tu
 
     return [(c[1], c[2], c[3], c[4]) for c in crops_data]
 
-def build_mesh(crop_path: str, scene_folder: str, scene_id: str, obj_idx: int = 0) -> str:
+def build_mesh(crop_path: str, scene_folder: str, scene_id: str, obj_idx: int = 0, palette=None) -> str:
 
     base = Path(crop_path).stem
     out_dir = Path(scene_folder) / "meshes" / base
@@ -444,6 +446,18 @@ def build_mesh(crop_path: str, scene_folder: str, scene_id: str, obj_idx: int = 
 
     if not validate_mesh(mesh, scene_id, obj_idx):
         raise RuntimeError(f"Mesh quality validation failed for obj{obj_idx}")
+
+    if palette is not None:
+        try:
+            from app.restyle_2d import apply_palette_projection
+            rgb_part = image_no_bg.convert("RGB")
+            rgb_proj = apply_palette_projection(rgb_part, palette, strength=0.7)
+            r, g, b = rgb_proj.split()
+            _, _, _, a = image_no_bg.split()
+            image_no_bg = Image.merge("RGBA", (r, g, b, a))
+            logger.info(f"[{scene_id}] obj{obj_idx}: palette projection applied to crop (appearance channel).")
+        except Exception as e:
+            logger.warning(f"[{scene_id}] obj{obj_idx}: palette projection failed ({e}); using original crop.")
 
     with ThesisProfiler("3D_TexGen_Hunyuan", scene_id):
         paint_pipe = get_hunyuan_paint()
@@ -1224,6 +1238,8 @@ def position_meshes(
     scene_id: str,
     boxes: List[List[int]],
     labels: List[int] = None,
+    shell_colors: Dict[str, list] = None,
+    out_subdir: str = "final",
 ) -> str:
 
     with ThesisProfiler("Spatial_Assembly_ZoeDepth", scene_id):
@@ -1243,6 +1259,7 @@ def position_meshes(
             model, processor = depth_result[0], depth_result[1]
             model_type = depth_result[2] if len(depth_result) > 2 else "dav2"
 
+            model.to(PIPELINE_DEVICE)
             inputs = processor(images=image, return_tensors="pt").to(PIPELINE_DEVICE)
             with torch.no_grad():
                 outputs = model(**inputs)
@@ -1599,12 +1616,20 @@ def position_meshes(
         ceiling_mesh = trimesh.creation.box(extents=[rw, 0.02, rz_max])
         ceiling_mesh.apply_translation([cx_env, ry_max + 0.01, cz_env])
 
+        _default_shell = {
+            "floor":      [230, 228, 220, 255],
+            "back_wall":  [240, 238, 235, 255],
+            "left_wall":  [235, 235, 230, 255],
+            "right_wall": [235, 235, 230, 255],
+            "ceiling":    [245, 245, 240, 255],
+        }
+        _colors = {**_default_shell, **(shell_colors or {})}
         try:
-            floor_mesh.visual.vertex_colors = [230, 228, 220, 255]
-            back_wall_mesh.visual.vertex_colors = [240, 238, 235, 255]
-            left_wall_mesh.visual.vertex_colors = [235, 235, 230, 255]
-            right_wall_mesh.visual.vertex_colors = [235, 235, 230, 255]
-            ceiling_mesh.visual.vertex_colors = [245, 245, 240, 255]
+            floor_mesh.visual.vertex_colors = _colors["floor"]
+            back_wall_mesh.visual.vertex_colors = _colors["back_wall"]
+            left_wall_mesh.visual.vertex_colors = _colors["left_wall"]
+            right_wall_mesh.visual.vertex_colors = _colors["right_wall"]
+            ceiling_mesh.visual.vertex_colors = _colors["ceiling"]
         except Exception:
             pass
 
@@ -1675,7 +1700,7 @@ def position_meshes(
         scene.camera = cam
         scene.camera_transform = cam_transform
 
-        out_dir = Path(scene_folder) / "final"
+        out_dir = Path(scene_folder) / out_subdir
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / "scene_positioned.glb"
         scene.export(str(out_path))
@@ -1741,3 +1766,98 @@ def full_reconstruction_panoramic(pano_folder: str, scene_folder: str) -> str:
 
     from .wall_pipeline import full_reconstruction_panoramic as _wall_recon
     return _wall_recon(pano_folder, scene_folder)
+
+
+def palette_to_shell_colors(palette) -> Dict[str, list]:
+    """Map a DesignSpec Palette to room-shell vertex colors.
+
+    Heuristic: dominant swatch → walls; second swatch (or darker variant) → floor;
+    brightest swatch (highest LAB L) → ceiling. Falls back to neutral defaults when
+    the palette has too few swatches or low confidence."""
+    if palette is None or not getattr(palette, "swatches", None):
+        return {}
+    swatches = sorted(palette.swatches, key=lambda s: s.proportion, reverse=True)
+
+    def to_rgba(rgb):
+        return [int(rgb[0]), int(rgb[1]), int(rgb[2]), 255]
+
+    wall_color = to_rgba(swatches[0].rgb)
+    if len(swatches) >= 2:
+        floor_color = to_rgba(swatches[1].rgb)
+    else:
+        r, g, b = swatches[0].rgb
+        floor_color = [max(0, int(r) - 20), max(0, int(g) - 20), max(0, int(b) - 20), 255]
+
+    ceiling_swatch = max(swatches, key=lambda s: s.lab[0])
+    ceiling_color = to_rgba(ceiling_swatch.rgb)
+
+    return {
+        "floor":      floor_color,
+        "back_wall":  wall_color,
+        "left_wall":  wall_color,
+        "right_wall": wall_color,
+        "ceiling":    ceiling_color,
+    }
+
+
+def commit_reconstruction(room_photo: str, scene_folder: str, spec, scene_id: str = None) -> str:
+    """Realize a DesignSpec as a palette-tinted 3D .glb, saved to ``committed/``.
+
+    Mirrors full_reconstruction but:
+    - Each build_mesh call receives the spec palette so the Hunyuan paint pass
+      receives palette-projected crops (appearance channel, disentanglement M5).
+    - position_meshes receives palette-derived shell colors (walls/floor/ceiling).
+    - Output goes to ``committed/scene_positioned.glb`` (not ``final/``).
+    """
+    if scene_id is None:
+        scene_id = Path(scene_folder).name
+    logger.info(f"[{scene_id}] Starting committed 3D reconstruction...")
+
+    try:
+        crops_and_boxes = detect_objects(room_photo, scene_folder, scene_id)
+    except Exception as e:
+        logger.error(f"[{scene_id}] Detection failed: {e}")
+        traceback.print_exc()
+        raise
+
+    if not crops_and_boxes:
+        raise RuntimeError("Commit aborted: no objects detected.")
+
+    crops_and_boxes = filter_detections(crops_and_boxes, scene_id)
+    if not crops_and_boxes:
+        raise RuntimeError("Commit aborted: all detections rejected by pre-generation filters.")
+
+    palette = getattr(spec, "palette", None) if spec is not None else None
+    shell_colors = palette_to_shell_colors(palette) if palette is not None else None
+
+    meshes: List[str] = []
+    valid_boxes: List[list] = []
+    valid_labels: List[int] = []
+    for idx, (crop_path, box, score, label) in enumerate(crops_and_boxes):
+        logger.info(f"[{scene_id}] Commit crop {idx} (confidence={score:.2f}, label={label})")
+        try:
+            mesh_path = build_mesh(
+                crop_path, scene_folder, scene_id, obj_idx=idx, palette=palette
+            )
+            meshes.append(mesh_path)
+            valid_boxes.append(box)
+            valid_labels.append(label)
+            cleanup_gpu(aggressive=False)
+        except Exception as e:
+            logger.error(f"[{scene_id}] Mesh failed for crop {idx}: {e}")
+            traceback.print_exc()
+
+    final_path = position_meshes(
+        mesh_paths=meshes,
+        image_path=room_photo,
+        scene_folder=scene_folder,
+        scene_id=scene_id,
+        boxes=valid_boxes,
+        labels=valid_labels,
+        shell_colors=shell_colors,
+        out_subdir="committed",
+    )
+
+    cleanup_gpu(aggressive=True)
+    logger.info(f"[{scene_id}] Commit complete: {final_path}")
+    return final_path
