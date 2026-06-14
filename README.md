@@ -50,10 +50,10 @@ app/
   scene_geometry.py            # geometry primitives (intrinsics, floor RANSAC, metric scaling)
   wall_pipeline.py             # 360° panorama decomposition path
   tasks.py                     # Celery task definitions
-  routers/                     # FastAPI routers: scenes, auth, users, debug, design
+  routers/                     # FastAPI routers: scenes, auth, users, debug, design, evaluation
   services/                    # orchestration layer
   repositories/                # SQLModel DB access
-  models/                      # SQLModel tables (Scene, User, DesignSession, Variant, ElementFeedback)
+  models/                      # SQLModel tables (Scene, User, DesignSession, Variant, ElementFeedback, evaluation tables)
 D-FINE/                        # vendored object detector (Objects365, run as subprocess)
 Hunyuan3D-2/                   # vendored 3D generator
 scripts/                       # evaluation harness (Structured3D / 3D-FRONT benchmarks)
@@ -211,6 +211,115 @@ paths = generate_variants(
 for p in paths:
     print(p, Image.open(p).size)
 ```
+
+---
+
+## Human validation system
+
+Structured research instrument for collecting architecture student evaluations of generated rooms. Designed for parallel use with Google Forms / Qualtrics — participants view images on the hosted viewer page while answering questions in an external form.
+
+### Access model
+
+```
+Researcher (JWT) → POST /evaluation/sessions
+                 ← { token, participant_url_hint: "/evaluation/{token}/view" }
+
+Share URL with participants (no account needed)
+   GET /evaluation/{token}/view   → HTML page with all variant images + 3D viewer
+
+Participants submit via the external form tool (Google Forms / Qualtrics).
+Results can optionally also be submitted directly via the token-based API.
+
+Researcher exports:
+   GET /evaluation/export/profiles.csv       → demographics
+   GET /evaluation/export/variants_2d.csv    → per-variant ratings
+   GET /evaluation/export/variant_sets.csv   → cross-variant comparison
+   GET /evaluation/export/commit_3d.csv      → 3D model ratings
+   GET /evaluation/export/all.csv            → all four tables concatenated
+```
+
+### The four evaluation forms
+
+#### Form 1 — Evaluator profile (demographics, filled once)
+
+Captured fields: age range, gender (optional), professional role, years of experience, education level, specialization, country of education, software stack (free list), and three 1–5 Likert familiarity scales (AI tools, 3D modeling, interior design software).
+
+#### Form 2 — Per-variant 2D evaluation (filled once per variant)
+
+18 Likert 1–7 items organized into four channels that map directly to the two disentanglement axes:
+
+| Channel | Items |
+|---|---|
+| Appearance / palette | Aesthetic quality, color harmony, palette fidelity to moodboard, atmosphere/mood, color temperature appropriateness |
+| Structure / furniture | Spatial layout preservation, furniture style consistency, furniture placement plausibility, scale and proportion accuracy |
+| Realism | Photorealism, lighting plausibility, material surface quality, shadow and reflection quality |
+| Professional | Professional suitability, client presentability, innovation and creativity, design coherence |
+
+Plus categorical items (would you present to a client? estimated manual redesign time) and four open-text fields: most appealing aspect, most problematic aspect, design suggestions, elements that reveal AI generation.
+
+#### Form 3 — Variant set comparison (filled once after seeing all variants)
+
+Core research probe for the disentanglement claim:
+
+- **Ranking**: ordered preference list of variant IDs
+- **Disentanglement perception**: `palette_change_perceived`, `furniture_change_perceived`, `perceived_what_changed` (per-channel dict), `disentanglement_clarity` (1–7), `palette_axis_control_confidence` (1–7), `furniture_axis_control_confidence` (1–7)
+- **Leakage probe**: `cross_channel_leakage_observed` (bool) + open description — measures whether a change intended for one axis unintentionally altered the other
+- **AI tool assessment**: utility, trustworthiness, workflow integration ease, time saved vs manual, professional adoption intent, whether the tool replaces or augments existing steps
+- Open text: biggest limitation, most valuable feature, suggested improvements, comparison to existing tools (Lumion, Enscape, Midjourney, etc.)
+
+#### Form 4 — 3D commit evaluation (filled after the 3D viewer)
+
+18 items across four groups: geometry accuracy (mesh completeness, spatial accuracy, furniture geometry, artifact presence), appearance (texture quality, material representation, palette fidelity, surface detail), 2D→3D fidelity (four items testing how faithfully the committed 3D matches the chosen variant and the original room), and professional applicability (usability for further modeling, BIM readiness, presentation quality, overall rating).
+
+Categorical: would you use this 3D output? preferred export format, cleanup effort required (none / minor / moderate / major / complete redo).
+
+### Running the study
+
+**Step 1 — Generate variants and commit to 3D** using the design zone endpoints (`POST /scenes/{id}/design/moodboard`, `→ /variants`, `→ /variants/{vid}/commit`).
+
+**Step 2 — Create a study session** (requires researcher account):
+
+```bash
+curl -X POST /evaluation/sessions \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scene_id": 1,
+    "design_session_id": 1,
+    "generation_engine_disclosed": false,
+    "notes": "Cohort A — MSc Architecture Year 2"
+  }'
+# Response includes "token" and "participant_url_hint"
+```
+
+**Step 3 — Share the viewer URL** in the Google Forms invitation email:
+```
+Please open this link before starting the form: https://your-server/evaluation/{token}/view
+Keep it open alongside the form — you will need to refer to the images while answering.
+```
+
+**Step 4 — Export results** after the study closes:
+
+```bash
+curl -H "Authorization: Bearer <token>" /evaluation/export/variants_2d.csv > variants.csv
+curl -H "Authorization: Bearer <token>" /evaluation/export/variant_sets.csv > sets.csv
+curl -H "Authorization: Bearer <token>" /evaluation/export/profiles.csv > demographics.csv
+```
+
+Each CSV maps directly to a DB table with no joins needed. Merge on `evaluator_profile_id` to combine demographics with ratings. `study_session_id` links all tables for multi-cohort filtering.
+
+### Key variables for statistical analysis
+
+| Variable | Table | Use |
+|---|---|---|
+| `palette_fidelity_to_moodboard` (1–7) | variant_2d | Palette channel fidelity |
+| `spatial_layout_preservation` (1–7) | variant_2d | Structure channel fidelity |
+| `disentanglement_clarity` (1–7) | variant_sets | Perceived independence of axes |
+| `cross_channel_leakage_observed` (bool) | variant_sets | Measured leakage |
+| `palette_change_perceived` / `furniture_change_perceived` | variant_sets | Perception probe |
+| `engine_type` (`diffusion` / `baseline`) | variant_2d | Ablation arm label |
+| `presentation_position` (1..N) | variant_2d | Position-bias covariate |
+| `fidelity_2d_to_3d` (1–7) | commit_3d | 2D→3D pipeline fidelity |
 
 ---
 
