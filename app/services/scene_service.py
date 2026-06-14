@@ -5,7 +5,7 @@ from sqlmodel import Session
 from app.repositories.scene_repo import create_scene_record, get_scene
 from app.models.scene import Scene
 from app.celery_app import celery_app
-from app.reconstructor_pipeline import detect_objects, build_mesh, merge_meshes
+from app.reconstructor_pipeline import detect_objects, build_mesh
 from typing import List
 from app.repositories.scene_repo import get_scenes_by_owner
 import os

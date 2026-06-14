@@ -6,7 +6,7 @@ from app.database import get_db
 from app.reconstructor_pipeline import (
     detect_objects,
     build_mesh,
-    merge_meshes,
+    position_meshes,
     full_reconstruction,
 )
 
@@ -51,9 +51,11 @@ async def debug_build(
         raise HTTPException(500, f"build_mesh failed: {e}")
     return {"scene_folder": str(scene_folder), "mesh": mesh}
 
-@router.post("/merge/")
-async def debug_merge(
+@router.post("/position/")
+async def debug_position(
     mesh_paths: list[str],
+    image_path: str,
+    boxes: list[list[int]],
     owner_id: int = 1,
     scene_id: str = None,
     db: Session = Depends(get_db),
@@ -61,9 +63,9 @@ async def debug_merge(
     scene_id = scene_id or "debug"
     scene_folder = _make_scene_folder(owner_id, scene_id)
     try:
-        final = merge_meshes(mesh_paths, str(scene_folder))
+        final = position_meshes(mesh_paths, image_path, str(scene_folder), scene_id, boxes)
     except Exception as e:
-        raise HTTPException(500, f"merge_meshes failed: {e}")
+        raise HTTPException(500, f"position_meshes failed: {e}")
     return {"scene_folder": str(scene_folder), "scene": final}
 
 @router.post("/full/")
